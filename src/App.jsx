@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 
 const API_BASE = "http://localhost:5050";
 const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
+const LOADING_GIF_SRC = "/loading.gif"; // ✅ public/loading.gif
 
 const hotelPlannerKnowledge =
   // Paste ALL extracted HotelPlanner policy/procedure text here
@@ -22,24 +23,36 @@ const SYSTEM_PROMPT = `You are QA Master — strict compliance & quality expert 
 Answer ONLY from the provided HotelPlanner documents.
 Never guess, never use external knowledge, never invent steps.
 If question cannot be answered from documents or is unrelated → say: 'This question is outside the scope of our documented HotelPlanner procedures. Please check with your supervisor or QA team.'
+
 HotelPlanner documents:
 {{hotelPlannerKnowledge}}
+
 Agent question:
 {{question}}
-Mandatory answer format:
 
-Follow the steps
+Mandatory answer format (STRICT — follow exactly):
+
+Follow the steps:
 1) ...
 2) ...
 3) ...
 
-Professional, calm, guest-first language
-At the end, always add:
+Then add:
+
+Matrix Reference
+- Sheet: [Voice Matrix or Ticket Matrix]
+- Category: [exact category header from matrix]
+- Issue Row: [exact issue title from matrix]
 
 QA Check
 • Compliance: [Yes/No + one sentence]
 • Guest experience: [one sentence]
 • Risk prevention: [one sentence]
+
+Rules:
+- Use ONLY information that appears in the documents/matrix text above.
+- If the exact issue row cannot be found, say it is outside scope.
+- Do not add extra sections besides the required ones.
 Be concise yet complete (300–900 words).`;
 
 function safeText(v) {
@@ -152,7 +165,7 @@ function sheetToNotesText(worksheet, sheetLabel) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState("voice"); // "voice" | "ticket"
+  const [mode, setMode] = useState("voice");
   const [question, setQuestion] = useState("");
   const [lastQuestion, setLastQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -302,7 +315,10 @@ export default function App() {
             {isLoading ? (
               <div className="cc-msg cc-assistant">
                 <div className="cc-bubble cc-bubbleAssistant">
-                  <div className="cc-thinking">Thinking…</div>
+                  <div className="cc-loadingWrap">
+                    <img className="cc-loadingGif" src={LOADING_GIF_SRC} alt="Loading" />
+                    <div className="cc-thinking">Thinking…</div>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -373,12 +389,7 @@ export default function App() {
                   stroke="currentColor"
                   strokeWidth="1.6"
                 />
-                <path
-                  d="M19 11a7 7 0 0 1-14 0"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
+                <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 <path d="M12 18v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
               </svg>
             </button>
