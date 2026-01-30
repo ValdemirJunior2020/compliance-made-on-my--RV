@@ -14,6 +14,7 @@
 }
 
 /* ====== Topbar (Pill Navbar) ====== */
+/* ====== Topbar (Pill Navbar) ====== */
 .cc-topbar {
   position: fixed;
   top: 14px;
@@ -23,17 +24,34 @@
   height: 62px;
   z-index: 80;
 
-  border-radius: 999px;
+  border-radius: 999px; /* Essential for round pipe ends */
   padding: 10px;
 
-  /* --- METALLIC BLACK BACKGROUND --- */
-  background: linear-gradient(180deg, #4a4a4a 0%, #1a1a1a 40%, #000000 100%);
+  /* --- THE 3D "PIPE" EFFECT --- */
   
-  /* Shiny metallic edge */
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  /* 1. The main body gradient (simulates curvature) */
+  /* Dark Top -> Bright Highlight -> Main Body -> Deep Shadow -> Bottom Reflection */
+  background: linear-gradient(
+    to bottom,
+    #000000 0%,   /* Darkest top edge */
+    #5a5a5a 15%,  /* The "shinies" part (specular highlight) */
+    #1a1a1a 45%,  /* The main mid-tone */
+    #000000 80%,  /* Deep shadow below midline */
+    #1a1a1a 100%  /* Slight reflective light from below */
+  );
+  
+  /* 2. Removing flat border and using shadows for definition */
+  border: none; 
+  
   box-shadow: 
-    0 10px 30px rgba(0, 0, 0, 0.5), 
-    inset 0 1px 0 rgba(255, 255, 255, 0.15); /* Inner highlight */
+    /* Top crisp rim highlight */
+    inset 0 1px 1px rgba(255, 255, 255, 0.3),
+    /* Softer internal top glow */
+    inset 0 4px 6px rgba(255, 255, 255, 0.1),
+    /* Deep internal bottom shadow defining the curve */
+    inset 0 -5px 8px rgba(0, 0, 0, 0.7),
+    /* External drop shadow onto the page */
+    0 14px 28px rgba(0, 0, 0, 0.6);
   
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -52,16 +70,18 @@
 }
 
 /* BIGGER LOGO */
+/* BIGGER LOGO - Circle removed */
+/* App.css */
+/* In App.css */
 .cc-navLogo {
   width: 120px;
   height: 120px;
   border-radius: 999px;
   object-fit: contain;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent; /* Must be transparent */
+  border: none;
   padding: 8px;
   flex: 0 0 auto;
-
   margin-top: -24px;
   margin-bottom: -24px;
 }

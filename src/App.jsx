@@ -874,7 +874,7 @@ export default function App() {
   <div className="cc-navPill">
     <img
       className="cc-navLogo"
-      src="/HP-logo.png"
+      src="/HP-logo-gold.png"   /* <--- CHANGE THIS NAME */
       alt="HotelPlanner"
       // ... existing props
     />
@@ -888,27 +888,20 @@ export default function App() {
     </button>
 
     {/* --- INSERT THIS LINE --- */}
-    <div className="cc-navTitle">Call Center Compliance tool</div>
+   <div className="cc-navTitle">Call Center Compliance tool</div>
     {/* ------------------------ */}
 
     <div className="cc-navSpacer" />
 
-    <a
-      className="cc-navItem cc-navItemCTA"
-      href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      Say Hello
-    </a>
+    {/* "Say Hello" button removed from here */}
   </div>
 </div>
-// ...
 
-        <ResourcePopover open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
+<ResourcePopover open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
 
-        {/* Main */}
-        <div className="cc-main">
+{/* Main */}
+<div className="cc-main">
+{/* ... rest of your code ... */}
           <div className="cc-thread">
             <div className="cc-threadInner">
               {banner ? (
