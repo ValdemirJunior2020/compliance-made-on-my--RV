@@ -482,3 +482,15 @@
 .cc-pillBtnGhost {
   background: transparent;
 }
+/* src/App.css (REPLACE your current .cc-navLogo with this) */
+.cc-navLogo {
+  width: 92px;
+  height: 92px;
+  border-radius: 999px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 8px;
+  flex: 0 0 auto;
+}
+

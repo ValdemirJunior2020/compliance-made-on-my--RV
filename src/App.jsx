@@ -575,33 +575,29 @@ export default function App() {
     <ErrorBoundary>
       <div className="cc-root">
         {/* NAVBAR (like your screenshot) */}
-        <div className="cc-topbar">
-          <div className="cc-navPill">
-            <button
-              className={`cc-navItem cc-navItemPill ${workActive ? "is-active" : ""}`}
-              type="button"
-              onClick={() => setWorkActive(true)}
-            >
-              Work
-            </button>
+       <div className="cc-topbar">
+  <div className="cc-navPill">
+    <img className="cc-navLogo" src="/HP-logo.png" alt="HotelPlanner" />
 
-            <button className="cc-navItem" type="button" onClick={() => setResourcesOpen(true)}>
-              Resources
-            </button>
 
-            <div className="cc-navSpacer" />
 
-        <a
-  className="cc-navItem cc-navItemCTA"
-  href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
-  target="_blank"
-  rel="noopener noreferrer"
->
-  Say Hello
-</a>
+    <button className="cc-navItem" type="button" onClick={() => setResourcesOpen(true)}>
+      Resources
+    </button>
 
-        </div>
-      </div>
+    <div className="cc-navSpacer" />
+
+    <a
+      className="cc-navItem cc-navItemCTA"
+      href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Say Hello
+    </a>
+  </div>
+</div>
+
 
       <ResourcePopover open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
 
