@@ -1,631 +1,740 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
-import * as XLSX from "xlsx";
 import "./App.css";
 
 const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
 
 // public assets
-const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
 const LOADING_GIF_SRC = "/loading.gif";
 const NAV_LOGO_VIDEO_SRC = "/Video_Generation_Confirmation.mp4";
 const ERROR_VIDEO_SRC = "/Video_Animation_For_Error_Created.mp4";
 
-// NEW public docs you added
-const TRAINING_GUIDE_TXT_PATH = "/training_guide.txt";
-const QA_VOICE_XLSX_PATH = "/qa-voice.xlsx";
+// downloads (public)
 const QA_GROUP_XLSX_PATH = "/qa-group.xlsx";
+const QA_VOICE_XLSX_PATH = "/qa-voice.xlsx";
+const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
 
-// ====== CORE DOCS (paste tomorrow if you want) ======
-const hotelPlannerKnowledge = `HOTELPLANNER CORE DOCUMENTS (PASTE HERE TOMORROW)`;
+// docs used by app (public)
+const TRAINING_GUIDE_TXT_PATH = "/training_guide.txt";
+const TRAINING_GUIDE_CHUNKS_PATH = "/training_guide.chunks.jsonl";
 
-// ====== PROMPT ======
-const SYSTEM_PROMPT = `You are QA Master — strict compliance & quality expert for HotelPlanner call center agents.
-Answer ONLY from the provided HotelPlanner documents.
-Never guess, never use external knowledge, never invent steps.
-If question cannot be answered from documents or is unrelated → say: 'This question is outside the scope of our documented HotelPlanner procedures. Please check with your supervisor or QA team.'
+// --- utils -------------------------------------------------------------------
 
-HotelPlanner documents:
-{{hotelPlannerKnowledge}}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-Agent question:
-{{question}}
-
-Mandatory answer format (STRICT — follow exactly):
-
-Follow the steps:
-1) ...
-2) ...
-3) ...
-
-Then add:
-
-Matrix Reference
-- Sheet: [Voice Matrix or Ticket Matrix]
-- Category: [exact category header from matrix]
-- Issue Row: [exact issue title from matrix]
-
-QA Check
-• Compliance: [Yes/No + one sentence]
-• Guest experience: [one sentence]
-• Risk prevention: [one sentence]
-
-Rules:
-- Use ONLY information that appears in the documents/matrix text above.
-- If the exact issue row cannot be found, say it is outside scope.
-- Do not add extra sections besides the required ones.
-Be concise yet complete (300–900 words).`;
-
-function safeText(v) {
-  if (typeof v === "string") return v;
-  if (v == null) return "";
-  return String(v);
-}
-
-function normalizeCell(v) {
-  return safeText(v).replace(/\u200b|\u200c|\u200d|\ufeff/g, "").trim();
-}
-
-function extractClaudeText(payload) {
-  const content = payload?.content;
-  if (Array.isArray(content)) {
-    const textBlocks = content
-      .filter((b) => b && (b.type === "text" || typeof b.text === "string"))
-      .map((b) => safeText(b.text))
-      .filter(Boolean);
-    if (textBlocks.length) return textBlocks.join("\n\n").trim();
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return String(Date.now());
   }
-  return safeText(payload?.text || payload?.output_text || "").trim();
 }
 
-function buildSystemPrompt(question, knowledge) {
-  return SYSTEM_PROMPT.replace("{{hotelPlannerKnowledge}}", knowledge).replace(
-    "{{question}}",
-    String(question || "").trim()
-  );
+function safeString(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
 }
 
-function useAutosizeTextarea(value) {
-  const ref = useRef(null);
+function normalizeWs(s) {
+  return safeString(s).replace(/\r\n/g, "\n").replace(/\u0000/g, "").trim();
+}
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function isAbort(err) {
+  return err?.name === "AbortError" || /aborted/i.test(String(err?.message || ""));
+}
+
+function asHumanError(err) {
+  const msg = String(err?.message || err || "");
+  if (!msg) return "Something went wrong.";
+  return msg.length > 600 ? msg.slice(0, 600) + "…" : msg;
+}
+
+// Minimal HTML hardening for model output (not a full sanitizer).
+function stripDangerousHtml(html) {
+  let out = String(html || "");
+  out = out.replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "");
+  out = out.replace(/\son\w+\s*=\s*(".*?"|'.*?'|[^\s>]+)/gi, "");
+  out = out.replace(/(href|src)\s*=\s*("|\')\s*javascript:[\s\S]*?\2/gi, "$1=$2#$2");
+  return out;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function postToAnyEndpoint({ base, paths, payload, timeoutMs }) {
+  let lastErr = null;
+  for (const p of paths) {
+    const url = base.replace(/\/+$/, "") + p;
+    try {
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+        timeoutMs
+      );
+
+      const contentType = res.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
+      const body = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+
+      if (!res.ok) {
+        const err = new Error(
+          `HTTP ${res.status} on ${p}: ${normalizeWs(isJson ? safeString(body) : body) || res.statusText}`
+        );
+        err.status = res.status;
+        err.body = body;
+        err.path = p;
+        throw err;
+      }
+
+      return { ok: true, status: res.status, path: p, body };
+    } catch (e) {
+      lastErr = e;
+      if (e?.status === 401 || e?.status === 403) throw e;
+      if (isAbort(e)) throw e;
+    }
+  }
+  throw lastErr || new Error("No endpoint responded.");
+}
+
+function pickAnswerFromBody(body) {
+  if (body == null) return "";
+  if (typeof body === "string") return body;
+
+  const candidates = [
+    body.answer,
+    body.text,
+    body.message,
+    body.result,
+    body.output,
+    body.content,
+    body?.data?.answer,
+    body?.data?.text,
+    body?.data?.message,
+  ];
+
+  for (const c of candidates) {
+    const s = normalizeWs(c);
+    if (s) return s;
+  }
+  return normalizeWs(body);
+}
+
+function tryLoadLocal(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw == null ? fallback : JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function trySaveLocal(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+}
+
+function useAutoResizeTextarea(ref, value) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "0px";
-    const next = Math.min(el.scrollHeight, 200);
+    const next = clamp(el.scrollHeight, 28, 200);
     el.style.height = next + "px";
-  }, [value]);
-  return ref;
+  }, [ref, value]);
 }
 
-function sheetToMatrixText(worksheet, sheetLabel) {
-  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
+// --- Error Boundary -----------------------------------------------------------
 
-  let currentCategory = "";
-  const out = [];
-  out.push(`=== ${sheetLabel} ===`);
-
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const c1 = normalizeCell(row[1]);
-    const c2 = normalizeCell(row[2]);
-    const c3 = normalizeCell(row[3]);
-    const c4 = normalizeCell(row[4]);
-    const c5 = normalizeCell(row[5]);
-    const c6 = normalizeCell(row[6]);
-    const c7 = normalizeCell(row[7]);
-
-    // category headers look like: [Category in Col B] + "Instructions" in Col C
-    if (c1 && c2.toLowerCase() === "instructions") {
-      currentCategory = c1;
-      out.push("");
-      out.push(`# ${currentCategory}`);
-      out.push("");
-      continue;
-    }
-
-    // real issue rows
-    if (!c1 || !c2) continue;
-    if (!currentCategory) currentCategory = "General";
-
-    const parts = [];
-    parts.push(`- Issue: ${c1}`);
-    parts.push(`  Instructions: ${c2}`);
-    if (c3) parts.push(`  Slack: ${c3}`);
-    if (c4) parts.push(`  Refund Queue: ${c4}`);
-    if (c5) parts.push(`  Create a Ticket: ${c5}`);
-    if (c6) parts.push(`  Supervisor: ${c6}`);
-    if (c7) parts.push(`  VIPRES: ${c7}`);
-
-    out.push(parts.join("\n"));
-    out.push("");
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
   }
-
-  return out.join("\n").trim();
-}
-
-function sheetToNotesText(worksheet, sheetLabel) {
-  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false });
-  const out = [];
-  out.push(`=== ${sheetLabel} ===`);
-  out.push("");
-
-  for (let r = 0; r < rows.length; r++) {
-    const row = rows[r] || [];
-    const title = normalizeCell(row[1]);
-    const col2 = normalizeCell(row[2]);
-    const col3 = normalizeCell(row[3]);
-
-    if (!title) continue;
-    if (!col2 && !col3) continue;
-
-    out.push(`- ${title}`);
-    if (col2) out.push(`  ${col2}`);
-    if (col3) out.push(`  ${col3}`);
-    out.push("");
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
   }
-
-  return out.join("\n").trim();
-}
-
-// NEW: convert any Excel workbook (all tabs) into readable text
-function workbookToText(wb, title) {
-  const out = [];
-  out.push(`=== ${title} ===`);
-  for (const name of wb.SheetNames || []) {
-    const ws = wb.Sheets?.[name];
-    if (!ws) continue;
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
-    out.push("");
-    out.push(`# Sheet: ${name}`);
-    out.push("");
-    for (let r = 0; r < rows.length; r++) {
-      const row = rows[r] || [];
-      const cells = row.map((c) => normalizeCell(c)).filter(Boolean);
-      if (!cells.length) continue;
-      // keep it clean but readable
-      out.push(`- ${cells.join(" | ")}`);
-    }
+  componentDidCatch() {}
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="cc-root">
+        <div className="cc-thread">
+          <div className="cc-threadInner">
+            <div className="cc-bannerError">
+              <div style={{ fontWeight: 600 }}>🚨 UI turbulence detected</div>
+              <div className="cc-bannerSub">Refresh usually fixes it.</div>
+              <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button
+                  className="cc-sendBtn"
+                  onClick={() => window.location.reload()}
+                  style={{ width: "auto", padding: "0 14px" }}
+                >
+                  Reload
+                </button>
+                <button
+                  className="cc-sendBtn"
+                  onClick={() => this.setState({ hasError: false, error: null })}
+                  style={{ width: "auto", padding: "0 14px" }}
+                >
+                  Try again
+                </button>
+              </div>
+              <pre style={{ marginTop: 10, whiteSpace: "pre-wrap", fontSize: 12, color: "rgba(17,24,39,0.75)" }}>
+                {normalizeWs(this.state?.error?.stack || this.state?.error?.message || "Unknown error")}
+              </pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
-  return out.join("\n").trim();
 }
 
-// detect "low credits" billing error and show special UI
-function isBillingLowCredits(errText) {
-  const s = String(errText || "").toLowerCase();
+// --- UI bits -----------------------------------------------------------------
+
+const DEFAULT_DOCS = {
+  matrix: true,
+  trainingTxt: true,
+  trainingChunks: true,
+  qaVoice: false,
+  qaGroup: false,
+};
+
+const DOC_META = [
+  { key: "matrix", label: "Matrix 2026", path: MATRIX_PUBLIC_PATH },
+  { key: "trainingTxt", label: "Training Guide", path: TRAINING_GUIDE_TXT_PATH },
+  { key: "trainingChunks", label: "Guide Chunks", path: TRAINING_GUIDE_CHUNKS_PATH },
+  { key: "qaVoice", label: "QA Voice", path: QA_VOICE_XLSX_PATH },
+  { key: "qaGroup", label: "QA Groups", path: QA_GROUP_XLSX_PATH },
+];
+
+const MODE_META = [
+  { key: "cloud", label: "Cloud Mode" },
+  { key: "local", label: "Local Mode" },
+];
+
+const RESOURCES = [
+  { label: "QA Groups (.xlsx)", href: QA_GROUP_XLSX_PATH, fileName: "qa-group.xlsx" },
+  { label: "Service Matrix 2026 (.xlsx)", href: MATRIX_PUBLIC_PATH, fileName: "Service Matrix's 2026.xlsx" },
+  { label: "QA Voice (.xlsx)", href: QA_VOICE_XLSX_PATH, fileName: "qa-voice.xlsx" },
+];
+
+function buildPayload({ question, mode, docs }) {
+  return {
+    question,
+    mode,
+    docs,
+    client: { app: "Call Center Compliance App", ts: nowIso(), ui: "react" },
+  };
+}
+
+function MessageBubble({ m }) {
+  const isUser = m.role === "user";
+  const isAssistant = m.role === "assistant";
+
+  const html = useMemo(() => {
+    if (!isAssistant) return "";
+    const raw = normalizeWs(m.text);
+    if (!raw) return "";
+    marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
+    return stripDangerousHtml(marked.parse(raw));
+  }, [m.text, isAssistant]);
+
   return (
-    s.includes("credit balance is too low") ||
-    s.includes("plans & billing") ||
-    s.includes("purchase credits") ||
-    s.includes("insufficient") ||
-    s.includes("billing")
+    <div className={`cc-msg ${isUser ? "cc-user" : "cc-assistant"}`}>
+      <div className={`cc-bubble ${isAssistant ? "cc-bubbleAssistant" : ""}`}>
+        {m.kind === "loading" ? (
+          <div className="cc-loadingWrap">
+            <img
+              className="cc-loadingGif"
+              src={LOADING_GIF_SRC}
+              alt="loading"
+              onError={(e) => (e.currentTarget.src = "https://media.tenor.com/e_E1hMZnbdAAAAAi/meme-coffee.gif")}
+            />
+            <div className="cc-thinking">{m.thinkingText || "Thinking…"}</div>
+          </div>
+        ) : m.kind === "error401" ? (
+          <div className="cc-loadingWrap">
+            <video className="cc-errorVideo" autoPlay loop muted playsInline src={ERROR_VIDEO_SRC} />
+            <div className="cc-errorHint">
+              <div className="cc-error" style={{ textAlign: "center" }}>
+                🔒 Unauthorized (401). Your server rejected the request.
+              </div>
+              <div className="cc-bannerSub" style={{ textAlign: "center" }}>
+                Check API keys / env vars on Render and confirm the model provider is configured.
+              </div>
+              {m.text ? (
+                <pre className="cc-error" style={{ marginTop: 10 }}>
+                  {normalizeWs(m.text)}
+                </pre>
+              ) : null}
+            </div>
+          </div>
+        ) : m.kind === "error" ? (
+          <div className="cc-error">{normalizeWs(m.text)}</div>
+        ) : isAssistant ? (
+          <div className="cc-answer" dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <div className="cc-bubbleText">{normalizeWs(m.text)}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResourcePopover({ open, onClose }) {
+  if (!open) return null;
+
+  return (
+    <>
+      <div className="cc-popoverScrim" onClick={onClose} />
+      <div className="cc-popover" role="dialog" aria-modal="true">
+        <div className="cc-popoverHeader">
+          <div className="cc-popoverTitle">Resources</div>
+          <button className="cc-pillBtn cc-pillBtnGhost" onClick={onClose} type="button" aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        <div className="cc-popoverBody">
+          <div className="cc-popoverHint">Download the files below:</div>
+          <div className="cc-resourceList">
+            {RESOURCES.map((r) => (
+              <a key={r.href} className="cc-resourceItem" href={r.href} download={r.fileName} target="_blank" rel="noreferrer">
+                <div className="cc-resourceName">{r.label}</div>
+                <div className="cc-resourceSub">{r.fileName}</div>
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
 export default function App() {
-  const [matrixMode, setMatrixMode] = useState("voice"); // voice | ticket
-  const [docMode, setDocMode] = useState("matrix"); // matrix | training | qaVoice | qaGroup
+  const textareaRef = useRef(null);
+  const threadEndRef = useRef(null);
 
-  const [activeSourceLabel, setActiveSourceLabel] = useState("Matrix");
-  const [activeTabLabel, setActiveTabLabel] = useState("Voice (Customer Service)");
-  const [debugInfo, setDebugInfo] = useState("");
+  const [mode, setMode] = useState(() => tryLoadLocal("cc_mode", "cloud"));
+  const [docs, setDocs] = useState(() => tryLoadLocal("cc_docs", DEFAULT_DOCS));
+  const [docAvail, setDocAvail] = useState(() =>
+    DOC_META.reduce((acc, d) => {
+      acc[d.key] = true;
+      return acc;
+    }, {})
+  );
 
-  const [question, setQuestion] = useState("");
-  const [lastQuestion, setLastQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [input, setInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [banner, setBanner] = useState(null);
+  const [health, setHealth] = useState({ ok: null, last: null });
 
-  const [errorMsg, setErrorMsg] = useState("");
-  const [isBillingError, setIsBillingError] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [workActive, setWorkActive] = useState(true);
 
-  // matrix content
-  const [matrixVoiceText, setMatrixVoiceText] = useState("");
-  const [matrixTicketText, setMatrixTicketText] = useState("");
-  const [matrixNotesText, setMatrixNotesText] = useState("");
-  const [matrixLoadError, setMatrixLoadError] = useState("");
+  const [messages, setMessages] = useState(() => [
+    {
+      id: crypto?.randomUUID?.() || String(Math.random()),
+      role: "assistant",
+      text:
+        "Hi! Ask me what to do in a guest situation and I’ll respond using the selected procedures/policies.\n\nTip: select the docs in the footer first.",
+      ts: Date.now(),
+    },
+  ]);
 
-  // NEW: loaded docs content (from your new public files)
-  const [trainingGuideText, setTrainingGuideText] = useState("");
-  const [qaVoiceText, setQaVoiceText] = useState("");
-  const [qaGroupText, setQaGroupText] = useState("");
-  const [docsLoadError, setDocsLoadError] = useState("");
+  useAutoResizeTextarea(textareaRef, input);
 
-  const textareaRef = useAutosizeTextarea(question);
-  const listRef = useRef(null);
+  const activeDocsLabel = useMemo(() => {
+    const enabled = DOC_META.filter((d) => docs[d.key]).map((d) => d.label);
+    return enabled.length ? enabled.join(", ") : "No docs selected";
+  }, [docs]);
 
-  useEffect(() => {
-    marked.setOptions({ gfm: true, breaks: true });
+  const scrollToBottom = useCallback(() => {
+    const el = threadEndRef.current;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "end" });
   }, []);
 
-  // load main matrix excel from /public
   useEffect(() => {
-    async function loadMatrix() {
-      setMatrixLoadError("");
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  useEffect(() => trySaveLocal("cc_mode", mode), [mode]);
+  useEffect(() => trySaveLocal("cc_docs", docs), [docs]);
+
+  // Validate that public docs exist (HEAD)
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkOne(path) {
       try {
-        const res = await fetch(MATRIX_PUBLIC_PATH, { cache: "no-store" });
-        if (!res.ok) {
-          throw new Error(
-            `Matrix file not found. Put it in /public as: public/Service Matrix's 2026.xlsx (HTTP ${res.status})`
-          );
-        }
-        const buf = await res.arrayBuffer();
-        const wb = XLSX.read(buf, { type: "array" });
-
-        const voiceWs = wb.Sheets["Voice Matrix"] || wb.Sheets[wb.SheetNames[0]];
-        const ticketWs = wb.Sheets["Ticket Matrix"] || wb.Sheets[wb.SheetNames[1]];
-        const notesWs = wb.Sheets["Items to note"] || wb.Sheets[wb.SheetNames[2]];
-
-        setMatrixVoiceText(voiceWs ? sheetToMatrixText(voiceWs, "VOICE MATRIX (Customer Service)") : "");
-        setMatrixTicketText(ticketWs ? sheetToMatrixText(ticketWs, "TICKET MATRIX (Tickets Agents)") : "");
-        setMatrixNotesText(notesWs ? sheetToNotesText(notesWs, "ITEMS TO NOTE") : "");
-      } catch (e) {
-        setMatrixLoadError(e?.message || "Failed to load matrix.");
+        const res = await fetchWithTimeout(path, { method: "HEAD" }, 12000);
+        return res.ok;
+      } catch {
+        return false;
       }
     }
 
-    loadMatrix();
+    (async () => {
+      const next = {};
+      for (const d of DOC_META) next[d.key] = await checkOne(d.path);
+      if (cancelled) return;
+      setDocAvail((prev) => ({ ...prev, ...next }));
+
+      const missing = DOC_META.filter((d) => !next[d.key]).map((d) => d.label);
+      if (missing.length) {
+        setBanner({
+          type: "error",
+          title: "📁 Some public docs were not found",
+          sub: `Missing: ${missing.join(", ")}. Put them inside /public with the exact filenames.`,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // NEW: load doc files from /public ON DEMAND based on docMode
-  useEffect(() => {
-    async function loadDocsIfNeeded() {
-      setDocsLoadError("");
-
-      try {
-        if (docMode === "training" && !trainingGuideText) {
-          const res = await fetch(TRAINING_GUIDE_TXT_PATH, { cache: "no-store" });
-          if (!res.ok) throw new Error(`Training guide not found at public${TRAINING_GUIDE_TXT_PATH} (HTTP ${res.status})`);
-          const txt = await res.text();
-          setTrainingGuideText((txt || "").trim());
-        }
-
-        if (docMode === "qaVoice" && !qaVoiceText) {
-          const res = await fetch(QA_VOICE_XLSX_PATH, { cache: "no-store" });
-          if (!res.ok) throw new Error(`QA Voice Excel not found at public${QA_VOICE_XLSX_PATH} (HTTP ${res.status})`);
-          const buf = await res.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          setQaVoiceText(workbookToText(wb, "QUALITY ASSURANCE VOICE (from qa-voice.xlsx)"));
-        }
-
-        if (docMode === "qaGroup" && !qaGroupText) {
-          const res = await fetch(QA_GROUP_XLSX_PATH, { cache: "no-store" });
-          if (!res.ok) throw new Error(`QA Group Excel not found at public${QA_GROUP_XLSX_PATH} (HTTP ${res.status})`);
-          const buf = await res.arrayBuffer();
-          const wb = XLSX.read(buf, { type: "array" });
-          setQaGroupText(workbookToText(wb, "QUALITY ASSURANCE GROUP REQUEST (from qa-group.xlsx)"));
-        }
-      } catch (e) {
-        setDocsLoadError(e?.message || "Failed to load selected document.");
+  const runHealthCheck = useCallback(async () => {
+    try {
+      const res = await fetchWithTimeout(`${API_BASE.replace(/\/+$/, "")}/health`, {}, 12000);
+      const ok = res.ok;
+      setHealth({ ok, last: Date.now() });
+      if (!ok) {
+        setBanner({ type: "error", title: "🛰️ Server health check failed", sub: `Health endpoint returned HTTP ${res.status}.` });
       }
+    } catch (e) {
+      setHealth({ ok: false, last: Date.now() });
+      setBanner({ type: "error", title: "🛰️ Server not reachable", sub: isAbort(e) ? "Health check timed out." : asHumanError(e) });
+    }
+  }, []);
+
+  useEffect(() => {
+    runHealthCheck();
+    const t = setInterval(() => runHealthCheck(), 120000);
+    return () => clearInterval(t);
+  }, [runHealthCheck]);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setResourcesOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const addMessage = useCallback((m) => setMessages((prev) => [...prev, m]), []);
+
+  const replaceLastAssistant = useCallback((replacement) => {
+    setMessages((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].role === "assistant") {
+          copy[i] = { ...copy[i], ...replacement };
+          break;
+        }
+      }
+      return copy;
+    });
+  }, []);
+
+  const toggleDoc = useCallback((key) => setDocs((prev) => ({ ...prev, [key]: !prev[key] })), []);
+
+  const clearInput = useCallback(() => {
+    setInput("");
+    textareaRef.current?.focus?.();
+  }, []);
+
+  const send = useCallback(async () => {
+    const question = normalizeWs(input);
+    if (!question || isSending) return;
+
+    const enabledCount = DOC_META.reduce((n, d) => n + (docs[d.key] ? 1 : 0), 0);
+    if (enabledCount === 0) {
+      setBanner({
+        type: "error",
+        title: "📌 No docs selected",
+        sub: "Select at least one doc chip in the footer so answers follow policy correctly.",
+      });
+      return;
     }
 
-    loadDocsIfNeeded();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docMode]);
+    setBanner(null);
+    setIsSending(true);
 
-  const activeMatrixText = matrixMode === "voice" ? matrixVoiceText : matrixTicketText;
+    addMessage({ id: crypto?.randomUUID?.() || String(Math.random()), role: "user", text: question, ts: Date.now() });
+    addMessage({
+      id: crypto?.randomUUID?.() || String(Math.random()),
+      role: "assistant",
+      kind: "loading",
+      text: "",
+      thinkingText: mode === "cloud" ? "Thinking in cloud mode…" : "Thinking locally…",
+      ts: Date.now(),
+    });
 
-  const activeDocsText = useMemo(() => {
-    if (docMode === "training") return trainingGuideText || "TRAINING GUIDE: (loading or empty)";
-    if (docMode === "qaVoice") return qaVoiceText || "QA VOICE: (loading or empty)";
-    if (docMode === "qaGroup") return qaGroupText || "QA GROUP: (loading or empty)";
-    return activeMatrixText;
-  }, [docMode, activeMatrixText, trainingGuideText, qaVoiceText, qaGroupText]);
+    setInput("");
 
-  const combinedKnowledge = useMemo(() => {
-    return [hotelPlannerKnowledge.trim(), activeDocsText.trim(), matrixNotesText.trim()]
-      .filter(Boolean)
-      .join("\n\n");
-  }, [activeDocsText, matrixNotesText]);
+    const payload = buildPayload({
+      question,
+      mode,
+      docs: { ...docs, _availability: docAvail, _activeDocsLabel: activeDocsLabel },
+    });
 
-  const answerHtml = useMemo(() => {
-    const a = (answer || "").trim();
-    if (!a) return "";
-    return marked.parse(a);
-  }, [answer]);
-
-  useEffect(() => {
-    if (!listRef.current) return;
-    listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [answer, isLoading, errorMsg, lastQuestion, isBillingError, docsLoadError]);
-
-  useEffect(() => {
-    const which =
-      docMode === "matrix"
-        ? `Doc: Matrix | Tab: ${matrixMode}`
-        : docMode === "training"
-        ? "Doc: Training Guide"
-        : docMode === "qaVoice"
-        ? "Doc: QA Voice"
-        : "Doc: QA Group Request";
-
-    const matrixLen = (activeMatrixText || "").length;
-    const notesLen = (matrixNotesText || "").length;
-    const docsLen = (activeDocsText || "").length;
-    const coreLen = (hotelPlannerKnowledge || "").length;
-
-    setDebugInfo(`${which} | lengths => core:${coreLen} docs:${docsLen} matrix:${matrixLen} notes:${notesLen}`);
-  }, [docMode, matrixMode, activeMatrixText, activeDocsText, matrixNotesText]);
-
-  async function send() {
-    const q = question.trim();
-    if (!q || isLoading) return;
-
-    setIsLoading(true);
-    setErrorMsg("");
-    setDocsLoadError("");
-    setIsBillingError(false);
-    setAnswer("");
-    setLastQuestion(q);
+    const endpoints = ["/api/ask", "/ask", "/api/chat", "/chat", "/query", "/api/query"];
+    const maxAttempts = 2;
 
     try {
-      const system = buildSystemPrompt(q, combinedKnowledge);
+      let last = null;
 
-      const res = await fetch(`${API_BASE}/api/claude`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ system, question: q }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        const details = data?.details ? String(data.details) : "";
-        const msg = data?.error ? String(data.error) : "Request failed";
-        const full = `${msg}${details ? "\n\n" + details : ""}`;
-
-        const billing = isBillingLowCredits(full);
-        setIsBillingError(billing);
-
-        throw new Error(full);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          last = await postToAnyEndpoint({ base: API_BASE, paths: endpoints, payload, timeoutMs: 65000 });
+          break;
+        } catch (e) {
+          if (e?.status === 401) throw e;
+          if (e?.status === 429 && attempt < maxAttempts) {
+            await sleep(900 + Math.floor(Math.random() * 500));
+            continue;
+          }
+          if (Number(e?.status) >= 500 && attempt < maxAttempts) {
+            await sleep(650 + Math.floor(Math.random() * 450));
+            continue;
+          }
+          if (isAbort(e)) throw e;
+          throw e;
+        }
       }
 
-      const text = extractClaudeText(data);
-      setAnswer(text || "No answer returned.");
-      setQuestion("");
-    } catch (err) {
-      const msg = err?.message || "Failed to fetch.";
-      setErrorMsg(msg);
-      setIsBillingError(isBillingLowCredits(msg));
+      const answerText = pickAnswerFromBody(last?.body);
+      const finalText = normalizeWs(answerText) || "No answer returned from server.";
+
+      replaceLastAssistant({ kind: undefined, text: finalText, ts: Date.now(), meta: { endpoint: last?.path, status: last?.status, mode } });
+      setHealth((h) => ({ ...h, ok: true, last: Date.now() }));
+    } catch (e) {
+      const status = e?.status;
+
+      if (status === 401) {
+        replaceLastAssistant({ kind: "error401", text: normalizeWs(e?.message || "Unauthorized (401)."), ts: Date.now() });
+      } else {
+        const friendly =
+          status === 429
+            ? "⏳ Rate limit hit (429). Please try again in a moment."
+            : status === 413
+            ? "📦 Request too large (413). Shorten the question or reduce selected docs."
+            : isAbort(e)
+            ? "⏱️ Timed out. Server took too long. Try again."
+            : status
+            ? `⚠️ Server error (HTTP ${status}).`
+            : "⚠️ Network error. Check server / internet.";
+
+        replaceLastAssistant({ kind: "error", text: `${friendly}\n\nDetails:\n${normalizeWs(e?.message || asHumanError(e))}`, ts: Date.now() });
+      }
+
+      setBanner({ type: "error", title: "🧯 We handled an error safely", sub: normalizeWs(e?.message || asHumanError(e)) });
+      setHealth((h) => ({ ...h, ok: false, last: Date.now() }));
     } finally {
-      setIsLoading(false);
+      setIsSending(false);
     }
-  }
+  }, [input, isSending, docs, mode, addMessage, replaceLastAssistant, docAvail, activeDocsLabel]);
 
-  function onKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  }
-
-  const canSend = question.trim().length > 0 && !isLoading;
+  const onKeyDown = useCallback(
+    (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    },
+    [send]
+  );
 
   return (
-    <div className="cc-root">
-      <header className="cc-topbar">
-        <div className="cc-topbar-inner">
-          <div className="cc-nav-left">
-            <video className="cc-nav-logoVideo" src={NAV_LOGO_VIDEO_SRC} autoPlay loop muted playsInline />
-          </div>
+    <ErrorBoundary>
+      <div className="cc-root">
+        {/* NAVBAR (like your screenshot) */}
+        <div className="cc-topbar">
+          <div className="cc-navPill">
+            <button
+              className={`cc-navItem cc-navItemPill ${workActive ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setWorkActive(true)}
+            >
+              Work
+            </button>
 
-          <div className="cc-title">Call Center Compliance App</div>
+            <button className="cc-navItem" type="button" onClick={() => setResourcesOpen(true)}>
+              Resources
+            </button>
 
-          <div className="cc-nav-right" />
+            <div className="cc-navSpacer" />
+
+        <a
+  className="cc-navItem cc-navItemCTA"
+  href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
+  target="_blank"
+  rel="noopener noreferrer"
+>
+  Say Hello
+</a>
+
         </div>
-      </header>
+      </div>
 
-      <main className="cc-main">
-        <div className="cc-thread" ref={listRef}>
+      <ResourcePopover open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
+
+      {/* Main */}
+      <div className="cc-main">
+        <div className="cc-thread">
           <div className="cc-threadInner">
-            {matrixLoadError ? (
+            {banner ? (
               <div className="cc-bannerError">
-                {matrixLoadError}
-                <div className="cc-bannerSub">
-                  Fix: put your Excel file here exactly: <b>public/Service Matrix&apos;s 2026.xlsx</b>
-                </div>
+                <div style={{ fontWeight: 600 }}>{banner.title}</div>
+                <div className="cc-bannerSub">{banner.sub}</div>
               </div>
             ) : null}
 
-            {docsLoadError ? (
-              <div className="cc-bannerError">
-                {docsLoadError}
-                <div className="cc-bannerSub">
-                  Check your file names in <b>public/</b>: qa-voice.xlsx, qa-group.xlsx, training_guide.txt
-                </div>
+            <div className="cc-hero">
+              <div className="cc-heroTitle">
+                Mode: <b>{mode === "cloud" ? "Cloud" : "Local"}</b> • Docs: <b>{activeDocsLabel}</b>
               </div>
-            ) : null}
-
-            {!lastQuestion && !answer && !isLoading && !errorMsg ? (
-              <div className="cc-hero">
-                <div className="cc-heroTitle">HotelPlanner • QA Compliance</div>
-                <div className="cc-heroSub">Choose a document button below, then ask a guest situation question.</div>
+              <div className="cc-heroSub">
+                Server:{" "}
+                <span style={{ fontWeight: 600 }}>
+                  {health.ok == null ? "checking…" : health.ok ? "online" : "offline"}
+                </span>
+                {health.last ? (
+                  <span style={{ marginLeft: 8, color: "rgba(17,24,39,0.45)", fontSize: 12 }}>
+                    ({new Date(health.last).toLocaleTimeString()})
+                  </span>
+                ) : null}
               </div>
-            ) : null}
+            </div>
 
-            {lastQuestion ? (
-              <div className="cc-msg cc-user">
-                <div className="cc-bubble">
-                  <div className="cc-bubbleText">{lastQuestion}</div>
-                </div>
-              </div>
-            ) : null}
+            {messages.map((m) => (
+              <MessageBubble key={m.id} m={m} />
+            ))}
 
-            {isLoading ? (
-              <div className="cc-msg cc-assistant">
-                <div className="cc-bubble cc-bubbleAssistant">
-                  <div className="cc-loadingWrap">
-                    <img className="cc-loadingGif" src={LOADING_GIF_SRC} alt="Loading" />
-                    <div className="cc-thinking">Thinking…</div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {!isLoading && isBillingError ? (
-              <div className="cc-msg cc-assistant">
-                <div className="cc-bubble cc-bubbleAssistant">
-                  <div className="cc-errorMedia">
-                    <video className="cc-errorVideo" src={ERROR_VIDEO_SRC} autoPlay loop muted playsInline />
-                    <div className="cc-errorTitle">Claude credits needed</div>
-                    <div className="cc-errorHint">
-                      Your Anthropic account has no credits right now. Ask your supervisor to add credits or create a new
-                      API key with billing enabled.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {errorMsg && !isBillingError ? (
-              <div className="cc-msg cc-assistant">
-                <div className="cc-bubble cc-bubbleAssistant">
-                  <div className="cc-error" role="alert">
-                    {errorMsg}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {answer ? (
-              <div className="cc-msg cc-assistant">
-                <div className="cc-bubble cc-bubbleAssistant">
-                  <article className="cc-answer" dangerouslySetInnerHTML={{ __html: answerHtml }} />
-                </div>
-              </div>
-            ) : null}
-
+            <div ref={threadEndRef} />
             <div className="cc-spacer" />
           </div>
         </div>
-      </main>
+      </div>
 
-      <footer className="cc-footer">
+      {/* Footer stays as you already have */}
+      <div className="cc-footer">
         <div className="cc-footer-inner">
-          <div className="cc-docRow" role="group" aria-label="Knowledge source">
-            <button
-              type="button"
-              className={`cc-chip ${docMode === "matrix" ? "is-active" : ""}`}
-              onClick={() => {
-                setDocMode("matrix");
-                setActiveSourceLabel("Matrix");
-              }}
-            >
-              Matrix
-            </button>
+          <div className="cc-docRow">
+            {DOC_META.map((d) => {
+              const active = !!docs[d.key];
+              const available = !!docAvail[d.key];
+              const disabled = !available;
 
-            <button
-              type="button"
-              className={`cc-chip ${docMode === "training" ? "is-active" : ""}`}
-              onClick={() => {
-                setDocMode("training");
-                setActiveSourceLabel("Training Guide");
-              }}
-            >
-              Training Guide
-            </button>
-
-            <button
-              type="button"
-              className={`cc-chip ${docMode === "qaVoice" ? "is-active" : ""}`}
-              onClick={() => {
-                setDocMode("qaVoice");
-                setActiveSourceLabel("Quality Assurance Voice");
-              }}
-            >
-              Quality Assurance Voice
-            </button>
-
-            <button
-              type="button"
-              className={`cc-chip ${docMode === "qaGroup" ? "is-active" : ""}`}
-              onClick={() => {
-                setDocMode("qaGroup");
-                setActiveSourceLabel("Quality Assurance Group Request");
-              }}
-            >
-              Quality Assurance Group Request
-            </button>
+              return (
+                <button
+                  key={d.key}
+                  className={`cc-chip ${active ? "is-active" : ""}`}
+                  title={disabled ? `${d.label} not found in /public (check filename)` : `Toggle ${d.label}`}
+                  onClick={() => {
+                    if (disabled) {
+                      setBanner({
+                        type: "error",
+                        title: "📁 Missing public file",
+                        sub: `${d.label} not found at ${d.path}. Make sure it exists in /public exactly.`,
+                      });
+                      return;
+                    }
+                    toggleDoc(d.key);
+                  }}
+                  style={{ opacity: disabled ? 0.45 : 1 }}
+                  type="button"
+                >
+                  {d.label}
+                </button>
+              );
+            })}
           </div>
 
-          <div className="cc-modeRow" role="group" aria-label="Matrix tab">
-            <button
-              type="button"
-              className={`cc-chip ${matrixMode === "voice" ? "is-active" : ""}`}
-              onClick={() => {
-                setMatrixMode("voice");
-                setActiveTabLabel("Voice (Customer Service)");
-              }}
-            >
-              Voice (Customer Service)
-            </button>
+          <div className="cc-modeRow">
+            {MODE_META.map((m) => {
+              const active = mode === m.key;
+              return (
+                <button
+                  key={m.key}
+                  className={`cc-chip ${active ? "is-active" : ""}`}
+                  onClick={() => setMode(m.key)}
+                  type="button"
+                  title={`Switch to ${m.label}`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
 
-            <button
-              type="button"
-              className={`cc-chip ${matrixMode === "ticket" ? "is-active" : ""}`}
-              onClick={() => {
-                setMatrixMode("ticket");
-                setActiveTabLabel("Tickets (Ticket Agents)");
-              }}
-            >
-              Tickets (Ticket Agents)
-            </button>
+              <button className="cc-chip" onClick={runHealthCheck} type="button" title="Run server health check">
+                Health Check
+              </button>
+            </div>
+
+            <div className="cc-inputShell">
+              <button className="cc-iconBtn" type="button" disabled title="Attachments disabled">
+                <span className="cc-plus">+</span>
+              </button>
+
+              <textarea
+                ref={textareaRef}
+                className="cc-textarea"
+                value={input}
+                placeholder="Type the guest situation… (Enter to send, Shift+Enter for new line)"
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                disabled={isSending}
+                spellCheck
+              />
+
+              <button className="cc-sendBtn" type="button" onClick={clearInput} disabled={isSending || !input.trim()} title="Clear" style={{ width: 40 }}>
+                ✕
+              </button>
+
+              <button className="cc-sendBtn" type="button" onClick={send} disabled={isSending || !input.trim()} title="Send">
+                ➤
+              </button>
+            </div>
+
+            <div className="cc-footer-note">This tool follows selected documents strictly. If something looks off, double-check the doc chips.</div>
           </div>
-
-          <div className="cc-selectedLine">
-            Using: <b>{activeSourceLabel}</b>
-            {docMode === "matrix" ? (
-              <>
-                {" "}
-                • Tab: <b>{activeTabLabel}</b>
-              </>
-            ) : null}
-            <div className="cc-debugSmall">{debugInfo}</div>
-          </div>
-
-          <div className="cc-inputShell">
-            <button className="cc-iconBtn" type="button" aria-label="Add (disabled)" disabled>
-              <span className="cc-plus">+</span>
-            </button>
-
-            <textarea
-              ref={textareaRef}
-              className="cc-textarea"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Ask about any guest situation, procedure or compliance question…"
-              rows={1}
-              spellCheck={true}
-              disabled={isLoading}
-            />
-
-            <button className="cc-iconBtn" type="button" aria-label="Mic (disabled)" disabled>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                />
-                <path d="M19 11a7 7 0 0 1-14 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <path d="M12 18v3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-            </button>
-
-            <button className="cc-sendBtn" onClick={send} disabled={!canSend} aria-label="Send" type="button">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M3 11.5L21 3L12.5 21L11 13L3 11.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
-
-          <div className="cc-footer-note">Quality Assurance team Management "Junior-2026"</div>
         </div>
-      </footer>
-    </div>
+
+        {/* Hidden logo video (optional) - keeps asset in bundle/cache */}
+        <video
+          src={NAV_LOGO_VIDEO_SRC}
+          style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+          muted
+          playsInline
+        />
+      </div>
+    </ErrorBoundary>
   );
 }

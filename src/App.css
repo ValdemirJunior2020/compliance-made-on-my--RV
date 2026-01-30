@@ -13,33 +13,103 @@
     "Segoe UI Emoji";
 }
 
+/* ====== Topbar (Pill Navbar like screenshot) ====== */
 .cc-topbar {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 56px;
-  background: #e8f5ff;
-  border-bottom: 1px solid rgba(17, 24, 39, 0.06);
-  z-index: 50;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(980px, calc(100vw - 40px));
+  height: 62px;
+  z-index: 80;
+
+  /* glass pill background */
+  border-radius: 999px;
+  padding: 10px;
+  background: rgba(10, 10, 14, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  /* subtle glow like the screenshot */
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-.cc-topbar-inner {
+/* the inside row */
+.cc-navPill {
   height: 100%;
+  width: 100%;
+  border-radius: 999px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 16px;
+  gap: 14px;
+  padding: 0 14px;
+}
+
+/* items */
+.cc-navItem {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 18px;
+  font-weight: 500;
+  padding: 10px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 120ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.cc-navItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+  transform: translateY(-1px);
+}
+
+.cc-navItemPill.is-active {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.cc-navSpacer {
+  flex: 1;
+}
+
+/* CTA like gradient ring in screenshot */
+.cc-navItemCTA {
+  position: relative;
+  padding: 10px 18px;
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+}
+
+.cc-navItemCTA::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #24d4ff, #a855f7, #ff8a00);
+  z-index: -1;
+  filter: blur(0px);
+}
+
+.cc-navItemCTA::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 999px;
+  background: rgba(10, 10, 14, 0.62);
+  z-index: -1;
 }
 
 .cc-title {
-  font-size: 19px;
-  color: rgba(17, 24, 39, 0.72);
-  font-weight: 500;
+  display: none; /* old title unused for this navbar style */
 }
 
+/* ====== Main ====== */
 .cc-main {
-  padding-top: 56px;
+  padding-top: 96px;     /* leaves room for pill navbar */
   padding-bottom: 190px;
 }
 
@@ -286,6 +356,22 @@
   white-space: pre-wrap;
 }
 
+.cc-errorVideo {
+  width: 520px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.cc-errorHint {
+  max-width: 640px;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(17, 24, 39, 0.62);
+}
+
 .cc-bannerError {
   border: 1px solid rgba(180, 35, 24, 0.2);
   background: rgba(180, 35, 24, 0.04);
@@ -301,50 +387,98 @@
   color: rgba(17, 24, 39, 0.55);
   font-size: 12px;
 }
-/* REPLACE your current .cc-nav-logoVideo with this (smaller + cropped clean) */
-/* ====== Bigger NAV logo video ====== */
-.cc-nav-logoVideo {
-  width: 44px;      /* was 28 */
-  height: 44px;     /* was 28 */
-  border-radius: 999px;
-  object-fit: cover;
-  border: 1px solid rgba(17, 24, 39, 0.10);
-  background: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
-  transform: none;  /* remove zoom tricks */
+
+/* ====== Resources popover ====== */
+.cc-popoverScrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 120;
 }
 
-/* keep navbar layout clean with bigger logo */
-.cc-topbar {
-  height: 60px; /* was 56 */
-}
+.cc-popover {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 28px));
+  z-index: 130;
 
-.cc-topbar-inner {
-  height: 100%;
-  display: grid;
-  grid-template-columns: 72px 1fr 72px; /* gives room for bigger logo */
-  align-items: center;
-  padding: 0 16px;
-}
-
-.cc-nav-left,
-.cc-nav-right {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 60px;
-}
-
-/* ====== Bigger ERROR video ====== */
-.cc-errorVideo {
-  width: 420px;    /* was 180 */
-  max-width: 100%;
-  height: auto;
   border-radius: 18px;
   border: 1px solid rgba(17, 24, 39, 0.10);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
 }
 
-.cc-errorHint {
-  max-width: 640px; /* let text breathe under bigger video */
+.cc-popoverHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.cc-popoverTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.82);
+}
+
+.cc-popoverBody {
+  padding: 14px;
+}
+
+.cc-popoverHint {
+  font-size: 13px;
+  color: rgba(17, 24, 39, 0.62);
+  margin-bottom: 10px;
+}
+
+.cc-resourceList {
+  display: grid;
+  gap: 10px;
+}
+
+.cc-resourceItem {
+  display: block;
+  text-decoration: none;
+  border-radius: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.10);
+  background: #fff;
+  padding: 12px 12px;
+  transition: transform 120ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.cc-resourceItem:hover {
+  transform: translateY(-1px);
+  border-color: rgba(17, 24, 39, 0.16);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.08);
+}
+
+.cc-resourceName {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.88);
+}
+
+.cc-resourceSub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: rgba(17, 24, 39, 0.58);
+}
+
+.cc-pillBtn {
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  color: rgba(17, 24, 39, 0.75);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.cc-pillBtnGhost {
+  background: transparent;
 }
