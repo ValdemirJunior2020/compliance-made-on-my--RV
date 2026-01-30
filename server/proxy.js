@@ -1,81 +1,104 @@
-﻿import "dotenv/config";
-import express from "express";
+﻿import express from "express";
 import cors from "cors";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
+import Anthropic from "@anthropic-ai/sdk";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 1. Load Environment (Robust)
+const envPaths = [
+  path.join(process.cwd(), "server", ".env"),
+  path.join(process.cwd(), ".env")
+];
+envPaths.forEach(p => dotenv.config({ path: p }));
 
 const app = express();
 
+// Config
 const PORT = Number(process.env.PORT || 5050);
-const ANTHROPIC_API_KEY = String(process.env.ANTHROPIC_API_KEY || "").trim();
-const MODEL = String(process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5").trim();
+const MODEL = process.env.MODEL || "claude-3-5-sonnet-20240620";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+const DEBUG = process.env.DEBUG === "true";
 
-// Render/prod CORS (comma-separated). If empty -> allow all (temporary)
-const CORS_ORIGINS = String(process.env.CORS_ORIGINS || "").trim();
-const allowed = CORS_ORIGINS
-  ? CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean)
-  : [];
+// Logger
+const log = (...a) => DEBUG && console.log("[proxy]", ...a);
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);
-      if (allowed.length === 0) return cb(null, true);
-      if (allowed.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked origin: ${origin}`), false);
-    },
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-    optionsSuccessStatus: 204
-  })
-);
+app.use(cors({ origin: "*" }));
+app.use(express.json({ limit: "2mb" })); // Limit added for security
 
-app.options("*", cors());
-app.use(express.json({ limit: "2mb" }));
-
+// Health Check
 app.get("/health", (req, res) => {
-  res.json({ ok: true, port: PORT, model: MODEL });
+  res.json({ ok: true, port: PORT, model: MODEL, ts: new Date().toISOString() });
 });
 
-app.post("/api/claude", async (req, res) => {
+// Main Handler
+async function handleAsk(req, res) {
+  const reqId = `req_${Date.now()}`;
+  log(`Request ${reqId}:`, req.body?.question?.slice(0, 50));
+
+  const question = req.body.question || req.body.text;
+  
+  // Validation
+  if (!question) {
+    return res.status(400).json({ ok: false, error: "Missing 'question'" });
+  }
+
+  // Auth Check
+  if (!ANTHROPIC_API_KEY) {
+    console.error("Missing ANTHROPIC_API_KEY");
+    // Return 500 but detail explains it
+    return res.status(500).json({ 
+      ok: false, 
+      error: "Server missing API Key. Check Render env vars." 
+    });
+  }
+
   try {
-    if (!ANTHROPIC_API_KEY) {
-      return res.status(500).json({ error: "Missing ANTHROPIC_API_KEY in env" });
-    }
+    const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+    
+    // Safety Timeout Race
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Upstream timeout")), 55000)
+    );
 
-    const { system, question } = req.body || {};
-    const q = String(question || "").trim();
-    const s = String(system || "").trim();
-    if (!q || !s) return res.status(400).json({ error: "Missing system or question" });
-
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 2800,
-        temperature: 0.2,
-        system: s,
-        messages: [{ role: "user", content: q }]
-      })
+    const apiPromise = anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 1000,
+      temperature: 0.2,
+      system: "You are a helpful call-center compliance assistant. Answer practically.",
+      messages: [{ role: "user", content: question }],
     });
 
-    const text = await r.text();
+    const msg = await Promise.race([apiPromise, timeoutPromise]);
+    
+    const text = msg.content[0]?.text || "No text content.";
+    log(`Success ${reqId}`);
 
-    if (!r.ok) {
-      return res.status(r.status).json({
-        error: `Anthropic API error ${r.status}`,
-        details: text
-      });
-    }
+    return res.json({ ok: true, answer: text });
 
-    res.setHeader("content-type", "application/json");
-    return res.status(200).send(text);
   } catch (e) {
-    return res.status(500).json({ error: "Server exception", details: e?.message || String(e) });
+    console.error(`Error ${reqId}:`, e.message);
+    
+    // Pass specific status codes to frontend so animation triggers
+    const status = e.status || 500;
+    
+    // Explicitly pass Anthropic billing errors (400/402/403)
+    // so the frontend "isNoCreditsError" check works
+    return res.status(status).json({
+      ok: false,
+      error: e.message,
+      body: e.error // Pass raw error body for inspection
+    });
   }
-});
+}
 
-app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
+// Routes
+["/api/claude", "/api/query", "/ask"].forEach(r => app.post(r, handleAsk));
+
+app.listen(PORT, () => {
+  console.log(`Proxy listening on ${PORT}`);
+  console.log(`Model: ${MODEL}`);
+});

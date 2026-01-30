@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { marked } from "marked";
 import "./App.css";
 
-const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
+const API_BASE = "http://localhost:5050";
 
 // public assets
 const LOADING_GIF_SRC = "/loading.gif";
@@ -334,7 +334,7 @@ function build404Message({ apiBase, attemptedPath }) {
 🔎 Server cannot find the requested webpage or resource (HTTP 404).
 
 What this usually means:
-- The frontend is POSTing to an endpoint that does not exist on your Render server.
+- The frontend is POSTing to an endpoint that does not exist on your server.
 - Example: your UI tried: ${attemptedPath || "(unknown path)"} but your backend route name is different.
 
 How to fix (pick 1):
@@ -347,6 +347,40 @@ How to fix (pick 1):
 Helpful checks:
 - Try opening (in browser): ${base}/health
 - Your app attempted: ${fullUrl}
+`);
+}
+
+function isNoCreditsError(e) {
+  const status = Number(e?.status || 0);
+  const rawBody = safeString(e?.body);
+  const msg = String(e?.message || "");
+  const hay = (msg + "\n" + rawBody).toLowerCase();
+
+  // Anthropic "no credits" / billing signals
+  const hit =
+    hay.includes("credit balance is too low") ||
+    hay.includes("plans & billing") ||
+    hay.includes("insufficient") && hay.includes("credit") ||
+    hay.includes("billing") && hay.includes("upgrade") ||
+    hay.includes("purchase credits");
+
+  // most common is HTTP 400 from Anthropic
+  return hit && (status === 400 || status === 402 || status === 403);
+}
+
+function buildNoCreditsMessage() {
+  return normalizeWs(`
+💳 No credits available for Claude (Anthropic).
+
+What happened:
+- Your ANTHROPIC_API_KEY is valid, but the account has $0 credits.
+
+Fix:
+1) Go to Anthropic Console → Plans & Billing
+2) Add payment method / purchase credits
+3) Restart the server (and redeploy on Render if needed)
+
+After you add credits, Cloud Mode will work normally.
 `);
 }
 
@@ -386,7 +420,7 @@ function MessageBubble({ m, isIntro }) {
                 🔒 Unauthorized (401). Your server rejected the request.
               </div>
               <div className="cc-bannerSub" style={{ textAlign: "center" }}>
-                Check API keys / env vars on Render and confirm the model provider is configured.
+                Check API keys / env vars on the server and confirm the provider is configured.
               </div>
               {m.text ? (
                 <pre className="cc-error" style={{ marginTop: 10 }}>
@@ -397,6 +431,23 @@ function MessageBubble({ m, isIntro }) {
           </div>
         ) : m.kind === "error404" ? (
           <div className="cc-error">{normalizeWs(m.text)}</div>
+        ) : m.kind === "errorNoCredits" ? (
+          <div className="cc-loadingWrap">
+            <video className="cc-errorVideo" autoPlay loop muted playsInline src={ERROR_VIDEO_SRC} />
+            <div className="cc-errorHint">
+              <div className="cc-error" style={{ textAlign: "center" }}>
+                💳 Claude credits are empty.
+              </div>
+              <div className="cc-bannerSub" style={{ textAlign: "center" }}>
+                Add credits in Anthropic Plans & Billing, then restart the server.
+              </div>
+              {m.text ? (
+                <pre className="cc-error" style={{ marginTop: 10 }}>
+                  {normalizeWs(m.text)}
+                </pre>
+              ) : null}
+            </div>
+          </div>
         ) : m.kind === "error" ? (
           <div className="cc-error">{normalizeWs(m.text)}</div>
         ) : isAssistant ? (
@@ -496,6 +547,7 @@ export default function App() {
     log("Mounted App");
     log("API_BASE:", API_BASE);
     log("Public docs paths:", DOC_META.map((d) => ({ label: d.label, path: d.path })));
+    log("ERROR_VIDEO_SRC:", ERROR_VIDEO_SRC);
   }, []);
 
   useEffect(() => {
@@ -603,7 +655,11 @@ export default function App() {
   }, []);
 
   const replaceLastAssistant = useCallback((replacement) => {
-    log("replaceLastAssistant:", { kind: replacement?.kind, len: (replacement?.text || "").length, meta: replacement?.meta });
+    log("replaceLastAssistant:", {
+      kind: replacement?.kind,
+      len: (replacement?.text || "").length,
+      meta: replacement?.meta,
+    });
     setMessages((prev) => {
       const copy = [...prev];
       for (let i = copy.length - 1; i >= 0; i--) {
@@ -629,7 +685,15 @@ export default function App() {
 
   const send = useCallback(async () => {
     const question = normalizeWs(input);
-    log("send() called:", { hasQuestion: !!question, isSending, mode, docs });
+
+    group("send() invoked", () => {
+      log("hasQuestion:", !!question);
+      log("isSending:", isSending);
+      log("mode:", mode);
+      log("docs:", docs);
+      log("docAvail:", docAvail);
+      log("activeDocsLabel:", activeDocsLabel);
+    });
 
     if (!question || isSending) return;
 
@@ -665,8 +729,7 @@ export default function App() {
       docs: { ...docs, _availability: docAvail, _activeDocsLabel: activeDocsLabel },
     });
 
-    // KEEP YOUR ORIGINAL IDEA (multi-endpoint probing) BUT ADD THE REAL ONE FIRST:
-    // Your server earlier was using /api/claude. If your backend is different, update this list to match.
+    // Multi-endpoint probing (keep) — put most likely endpoint FIRST
     const endpoints = ["/api/claude", "/api/ask", "/ask", "/api/chat", "/chat", "/query", "/api/query"];
     const maxAttempts = 2;
 
@@ -687,14 +750,15 @@ export default function App() {
           log("Endpoint success:", last);
           break;
         } catch (e) {
-          warn("Attempt failed:", { attempt, status: e?.status, path: e?.path, message: String(e?.message || e) });
+          warn("Attempt failed:", {
+            attempt,
+            status: e?.status,
+            path: e?.path,
+            message: String(e?.message || e),
+          });
 
           if (e?.status === 401) throw e;
-
-          if (e?.status === 404) {
-            // immediate: this is a route mismatch on server
-            throw e;
-          }
+          if (e?.status === 404) throw e;
 
           if (e?.status === 429 && attempt < maxAttempts) {
             await sleep(900 + Math.floor(Math.random() * 500));
@@ -746,6 +810,21 @@ export default function App() {
           type: "error",
           title: "🧯 We handled an error safely",
           sub: `HTTP 404 — Server cannot find the requested resource (${attemptedPath || "unknown endpoint"}).`,
+        });
+      } else if (isNoCreditsError(e)) {
+        // ✅ SHOW THE ERROR ANIMATION FOR "NO CREDITS"
+        const noCreditsText = buildNoCreditsMessage();
+        replaceLastAssistant({
+          kind: "errorNoCredits",
+          text: noCreditsText,
+          ts: Date.now(),
+          meta: { status, endpoint: e?.path, noCredits: true },
+        });
+
+        setBanner({
+          type: "error",
+          title: "💳 Claude credits empty",
+          sub: "Add credits in Anthropic Plans & Billing, then restart the server.",
         });
       } else {
         const friendly =
@@ -941,6 +1020,7 @@ export default function App() {
                 value={input}
                 placeholder="Type the guest situation… (Enter to send, Shift+Enter for new line)"
                 onChange={(e) => {
+                  log("Input changed:", { len: e.target.value.length });
                   setInput(e.target.value);
                 }}
                 onKeyDown={onKeyDown}
@@ -973,7 +1053,9 @@ export default function App() {
               </button>
             </div>
 
-            <div className="cc-footer-note">This tool follows selected documents strictly. If something looks off, double-check the doc chips.</div>
+            <div className="cc-footer-note">
+              This tool follows selected documents strictly. If something looks off, double-check the doc chips.
+            </div>
           </div>
         </div>
 
