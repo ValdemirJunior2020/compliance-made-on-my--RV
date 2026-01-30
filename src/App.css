@@ -67,28 +67,39 @@
 }
 
 /* items */
+/* ====== Nav Item (Resources, etc.) ====== */
 .cc-navItem {
   appearance: none;
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.92);
+  
+  /* --- GOLD GRADIENT TEXT --- */
+  background: linear-gradient(to right, #FCF6BA, #BF953F);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 700; /* Bold looks better for gold */
   padding: 10px 14px;
-  border-radius: 999px;
   cursor: pointer;
-  transition: transform 120ms ease, background 160ms ease, box-shadow 160ms ease;
   text-decoration: none;
+  
+  /* Smooth transition for the glow effect */
+  transition: transform 120ms ease, filter 200ms ease;
 }
 
+/* Hover State: Add a shiny gold glow instead of a gray box */
 .cc-navItem:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: none; /* Remove old gray background */
   transform: translateY(-1px);
+  filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.6)); /* Gold Glow */
 }
 
+/* Active State: Gold Underline */
 .cc-navItemPill.is-active {
-  background: rgba(17, 5, 244, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  background: none; /* Remove background so text stays gold */
+  box-shadow: 0 2px 0 0 #BF953F; /* Gold underline/border */
 }
 
 .cc-navSpacer {
