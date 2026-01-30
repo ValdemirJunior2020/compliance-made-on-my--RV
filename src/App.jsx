@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { marked } from "marked";
 import "./App.css";
 
-const API_BASE = "http://localhost:5050";
+const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
 
 // public assets
 const LOADING_GIF_SRC = "/loading.gif";
@@ -977,37 +977,7 @@ export default function App() {
               })}
             </div>
 
-            <div className="cc-modeRow">
-              {MODE_META.map((m) => {
-                const active = mode === m.key;
-                return (
-                  <button
-                    key={m.key}
-                    className={`cc-chip ${active ? "is-active" : ""}`}
-                    onClick={() => {
-                      log("Mode changed:", m.key);
-                      setMode(m.key);
-                    }}
-                    type="button"
-                    title={`Switch to ${m.label}`}
-                  >
-                    {m.label}
-                  </button>
-                );
-              })}
-
-              <button
-                className="cc-chip"
-                onClick={() => {
-                  log("Health Check clicked");
-                  runHealthCheck();
-                }}
-                type="button"
-                title="Run server health check"
-              >
-                Health Check
-              </button>
-            </div>
+            {/* Buttons removed here */}
 
             <div className="cc-inputShell">
               <button className="cc-iconBtn" type="button" disabled title="Attachments disabled">
