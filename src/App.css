@@ -35,6 +35,7 @@
 
 /* inside row */
 .cc-navPill {
+  position: relative;
   height: 100%;
   width: 100%;
   border-radius: 999px;
@@ -503,4 +504,30 @@
 
 .cc-pillBtnGhost {
   background: transparent;
+}
+/* Add this new class for the centered title */
+.cc-navTitle {
+  /* Positioning */
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  
+  /* Font styling */
+  font-size: 24px;
+  font-weight: 700; /* Thicker text makes the gradient easier to see */
+  white-space: nowrap;
+  pointer-events: none;
+  
+  /* --- GRADIENT TEXT MAGIC --- */
+  /* 1. Define the gradient background */
+  background: linear-gradient(90deg, #24d4ff, #a855f7, #ff8a00);
+  
+  /* 2. Clip the background to the text shape */
+  -webkit-background-clip: text;
+  background-clip: text;
+  
+  /* 3. Make the text transparent so the background shows through */
+  color: transparent; 
+  /* Fallback for very old browsers (optional): color: #a855f7; */
 }

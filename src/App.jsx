@@ -869,40 +869,41 @@ export default function App() {
     <ErrorBoundary>
       <div className="cc-root">
         {/* NAVBAR */}
-        <div className="cc-topbar">
-          <div className="cc-navPill">
-            <img
-              className="cc-navLogo"
-              src="/HP-logo.png"
-              alt="HotelPlanner"
-              onLoad={() => log("Navbar logo loaded")}
-              onError={() => warn("Navbar logo missing: put HP-logo.png in /public")}
-            />
+       // ... inside return (
+<div className="cc-topbar">
+  <div className="cc-navPill">
+    <img
+      className="cc-navLogo"
+      src="/HP-logo.png"
+      alt="HotelPlanner"
+      // ... existing props
+    />
 
-            <button
-              className={`cc-navItem ${resourcesOpen ? "cc-navItemPill is-active" : ""}`}
-              type="button"
-              onClick={() => {
-                log("Resources clicked -> open popover");
-                setResourcesOpen(true);
-              }}
-            >
-              Resources
-            </button>
+    <button
+      className={`cc-navItem ${resourcesOpen ? "cc-navItemPill is-active" : ""}`}
+      type="button"
+      onClick={() => setResourcesOpen(true)}
+    >
+      Resources
+    </button>
 
-            <div className="cc-navSpacer" />
+    {/* --- INSERT THIS LINE --- */}
+    <div className="cc-navTitle">Call Center Compliance tool</div>
+    {/* ------------------------ */}
 
-            <a
-              className="cc-navItem cc-navItemCTA"
-              href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={() => log("Say Hello clicked")}
-            >
-              Say Hello
-            </a>
-          </div>
-        </div>
+    <div className="cc-navSpacer" />
+
+    <a
+      className="cc-navItem cc-navItemCTA"
+      href="https://hotel-planner.slack.com/archives/D04S9PZ3VU3"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      Say Hello
+    </a>
+  </div>
+</div>
+// ...
 
         <ResourcePopover open={resourcesOpen} onClose={() => setResourcesOpen(false)} />
 
