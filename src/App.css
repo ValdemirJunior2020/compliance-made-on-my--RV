@@ -13,7 +13,7 @@
     "Segoe UI Emoji";
 }
 
-/* ====== Topbar (Pill Navbar like screenshot) ====== */
+/* ====== Topbar (Pill Navbar) ====== */
 .cc-topbar {
   position: fixed;
   top: 14px;
@@ -23,7 +23,6 @@
   height: 62px;
   z-index: 80;
 
-  /* glass pill background */
   border-radius: 999px;
   padding: 10px;
   background: rgba(10, 10, 14, 0.62);
@@ -31,13 +30,10 @@
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 
-  /* subtle glow like the screenshot */
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.18),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* the inside row */
+/* inside row */
 .cc-navPill {
   height: 100%;
   width: 100%;
@@ -46,6 +42,21 @@
   align-items: center;
   gap: 14px;
   padding: 0 14px;
+}
+
+/* BIGGER LOGO */
+.cc-navLogo {
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 8px;
+  flex: 0 0 auto;
+
+  margin-top: -24px;
+  margin-bottom: -24px;
 }
 
 /* items */
@@ -60,6 +71,7 @@
   border-radius: 999px;
   cursor: pointer;
   transition: transform 120ms ease, background 160ms ease, box-shadow 160ms ease;
+  text-decoration: none;
 }
 
 .cc-navItem:hover {
@@ -76,7 +88,7 @@
   flex: 1;
 }
 
-/* CTA like gradient ring in screenshot */
+/* CTA gradient ring */
 .cc-navItemCTA {
   position: relative;
   padding: 10px 18px;
@@ -91,7 +103,6 @@
   border-radius: 999px;
   background: linear-gradient(90deg, #24d4ff, #a855f7, #ff8a00);
   z-index: -1;
-  filter: blur(0px);
 }
 
 .cc-navItemCTA::after {
@@ -104,12 +115,12 @@
 }
 
 .cc-title {
-  display: none; /* old title unused for this navbar style */
+  display: none;
 }
 
 /* ====== Main ====== */
 .cc-main {
-  padding-top: 96px;     /* leaves room for pill navbar */
+  padding-top: 96px;
   padding-bottom: 190px;
 }
 
@@ -207,6 +218,17 @@
   background: rgba(17, 24, 39, 0.04);
   padding: 2px 6px;
   border-radius: 8px;
+}
+
+/* Center ONLY the welcome bubble */
+.cc-msg.cc-intro {
+  justify-content: center !important;
+}
+.cc-msg.cc-intro .cc-bubble {
+  width: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  text-align: center;
 }
 
 /* ====== Footer ====== */
@@ -482,15 +504,3 @@
 .cc-pillBtnGhost {
   background: transparent;
 }
-/* src/App.css (REPLACE your current .cc-navLogo with this) */
-.cc-navLogo {
-  width: 92px;
-  height: 92px;
-  border-radius: 999px;
-  object-fit: contain;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  padding: 8px;
-  flex: 0 0 auto;
-}
-
