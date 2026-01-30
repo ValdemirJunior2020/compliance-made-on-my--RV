@@ -7,7 +7,8 @@ const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
 // public assets
 const LOADING_GIF_SRC = "/loading.gif";
 const NAV_LOGO_VIDEO_SRC = "/Video_Generation_Confirmation.mp4";
-const ERROR_VIDEO_SRC = "/Video_Animation_For_Error_Created.mp4";
+// CORRECT WAY (No /public, and new short name)
+const ERROR_VIDEO_SRC = "/error.mp4";
 
 // downloads (public)
 const QA_GROUP_XLSX_PATH = "/qa-group.xlsx";
