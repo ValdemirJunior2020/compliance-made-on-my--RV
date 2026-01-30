@@ -9,12 +9,14 @@ const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
 const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
 const LOADING_GIF_SRC = "/loading.gif";
 const NAV_LOGO_VIDEO_SRC = "/Video_Generation_Confirmation.mp4";
-const ERROR_VIDEO_SRC = "/Video_Animation_For_Error_Created.mp4"; // <-- ADD
+const ERROR_VIDEO_SRC = "/Video_Animation_For_Error_Created.mp4";
 
-// ====== DOCUMENTS (placeholders for tomorrow) ======
-const trainingGuideKnowledge = `TRAINING GUIDE DOCUMENTS (PASTE HERE TOMORROW)`;
-const qaVoiceKnowledge = `QUALITY ASSURANCE VOICE DOCUMENTS (PASTE HERE TOMORROW)`;
-const qaGroupRequestKnowledge = `QUALITY ASSURANCE GROUP REQUEST DOCUMENTS (PASTE HERE TOMORROW)`;
+// NEW public docs you added
+const TRAINING_GUIDE_TXT_PATH = "/training_guide.txt";
+const QA_VOICE_XLSX_PATH = "/qa-voice.xlsx";
+const QA_GROUP_XLSX_PATH = "/qa-group.xlsx";
+
+// ====== CORE DOCS (paste tomorrow if you want) ======
 const hotelPlannerKnowledge = `HOTELPLANNER CORE DOCUMENTS (PASTE HERE TOMORROW)`;
 
 // ====== PROMPT ======
@@ -112,6 +114,7 @@ function sheetToMatrixText(worksheet, sheetLabel) {
     const c6 = normalizeCell(row[6]);
     const c7 = normalizeCell(row[7]);
 
+    // category headers look like: [Category in Col B] + "Instructions" in Col C
     if (c1 && c2.toLowerCase() === "instructions") {
       currentCategory = c1;
       out.push("");
@@ -120,6 +123,7 @@ function sheetToMatrixText(worksheet, sheetLabel) {
       continue;
     }
 
+    // real issue rows
     if (!c1 || !c2) continue;
     if (!currentCategory) currentCategory = "General";
 
@@ -163,7 +167,29 @@ function sheetToNotesText(worksheet, sheetLabel) {
   return out.join("\n").trim();
 }
 
-// NEW: detect "low credits" billing error and show special UI
+// NEW: convert any Excel workbook (all tabs) into readable text
+function workbookToText(wb, title) {
+  const out = [];
+  out.push(`=== ${title} ===`);
+  for (const name of wb.SheetNames || []) {
+    const ws = wb.Sheets?.[name];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false });
+    out.push("");
+    out.push(`# Sheet: ${name}`);
+    out.push("");
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r] || [];
+      const cells = row.map((c) => normalizeCell(c)).filter(Boolean);
+      if (!cells.length) continue;
+      // keep it clean but readable
+      out.push(`- ${cells.join(" | ")}`);
+    }
+  }
+  return out.join("\n").trim();
+}
+
+// detect "low credits" billing error and show special UI
 function isBillingLowCredits(errText) {
   const s = String(errText || "").toLowerCase();
   return (
@@ -176,8 +202,8 @@ function isBillingLowCredits(errText) {
 }
 
 export default function App() {
-  const [matrixMode, setMatrixMode] = useState("voice");
-  const [docMode, setDocMode] = useState("matrix");
+  const [matrixMode, setMatrixMode] = useState("voice"); // voice | ticket
+  const [docMode, setDocMode] = useState("matrix"); // matrix | training | qaVoice | qaGroup
 
   const [activeSourceLabel, setActiveSourceLabel] = useState("Matrix");
   const [activeTabLabel, setActiveTabLabel] = useState("Voice (Customer Service)");
@@ -189,12 +215,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState("");
-  const [isBillingError, setIsBillingError] = useState(false); // <-- ADD
+  const [isBillingError, setIsBillingError] = useState(false);
 
+  // matrix content
   const [matrixVoiceText, setMatrixVoiceText] = useState("");
   const [matrixTicketText, setMatrixTicketText] = useState("");
   const [matrixNotesText, setMatrixNotesText] = useState("");
   const [matrixLoadError, setMatrixLoadError] = useState("");
+
+  // NEW: loaded docs content (from your new public files)
+  const [trainingGuideText, setTrainingGuideText] = useState("");
+  const [qaVoiceText, setQaVoiceText] = useState("");
+  const [qaGroupText, setQaGroupText] = useState("");
+  const [docsLoadError, setDocsLoadError] = useState("");
 
   const textareaRef = useAutosizeTextarea(question);
   const listRef = useRef(null);
@@ -203,6 +236,7 @@ export default function App() {
     marked.setOptions({ gfm: true, breaks: true });
   }, []);
 
+  // load main matrix excel from /public
   useEffect(() => {
     async function loadMatrix() {
       setMatrixLoadError("");
@@ -231,14 +265,51 @@ export default function App() {
     loadMatrix();
   }, []);
 
+  // NEW: load doc files from /public ON DEMAND based on docMode
+  useEffect(() => {
+    async function loadDocsIfNeeded() {
+      setDocsLoadError("");
+
+      try {
+        if (docMode === "training" && !trainingGuideText) {
+          const res = await fetch(TRAINING_GUIDE_TXT_PATH, { cache: "no-store" });
+          if (!res.ok) throw new Error(`Training guide not found at public${TRAINING_GUIDE_TXT_PATH} (HTTP ${res.status})`);
+          const txt = await res.text();
+          setTrainingGuideText((txt || "").trim());
+        }
+
+        if (docMode === "qaVoice" && !qaVoiceText) {
+          const res = await fetch(QA_VOICE_XLSX_PATH, { cache: "no-store" });
+          if (!res.ok) throw new Error(`QA Voice Excel not found at public${QA_VOICE_XLSX_PATH} (HTTP ${res.status})`);
+          const buf = await res.arrayBuffer();
+          const wb = XLSX.read(buf, { type: "array" });
+          setQaVoiceText(workbookToText(wb, "QUALITY ASSURANCE VOICE (from qa-voice.xlsx)"));
+        }
+
+        if (docMode === "qaGroup" && !qaGroupText) {
+          const res = await fetch(QA_GROUP_XLSX_PATH, { cache: "no-store" });
+          if (!res.ok) throw new Error(`QA Group Excel not found at public${QA_GROUP_XLSX_PATH} (HTTP ${res.status})`);
+          const buf = await res.arrayBuffer();
+          const wb = XLSX.read(buf, { type: "array" });
+          setQaGroupText(workbookToText(wb, "QUALITY ASSURANCE GROUP REQUEST (from qa-group.xlsx)"));
+        }
+      } catch (e) {
+        setDocsLoadError(e?.message || "Failed to load selected document.");
+      }
+    }
+
+    loadDocsIfNeeded();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docMode]);
+
   const activeMatrixText = matrixMode === "voice" ? matrixVoiceText : matrixTicketText;
 
   const activeDocsText = useMemo(() => {
-    if (docMode === "training") return trainingGuideKnowledge;
-    if (docMode === "qaVoice") return qaVoiceKnowledge;
-    if (docMode === "qaGroup") return qaGroupRequestKnowledge;
+    if (docMode === "training") return trainingGuideText || "TRAINING GUIDE: (loading or empty)";
+    if (docMode === "qaVoice") return qaVoiceText || "QA VOICE: (loading or empty)";
+    if (docMode === "qaGroup") return qaGroupText || "QA GROUP: (loading or empty)";
     return activeMatrixText;
-  }, [docMode, activeMatrixText]);
+  }, [docMode, activeMatrixText, trainingGuideText, qaVoiceText, qaGroupText]);
 
   const combinedKnowledge = useMemo(() => {
     return [hotelPlannerKnowledge.trim(), activeDocsText.trim(), matrixNotesText.trim()]
@@ -255,7 +326,7 @@ export default function App() {
   useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [answer, isLoading, errorMsg, lastQuestion, isBillingError]);
+  }, [answer, isLoading, errorMsg, lastQuestion, isBillingError, docsLoadError]);
 
   useEffect(() => {
     const which =
@@ -281,6 +352,7 @@ export default function App() {
 
     setIsLoading(true);
     setErrorMsg("");
+    setDocsLoadError("");
     setIsBillingError(false);
     setAnswer("");
     setLastQuestion(q);
@@ -301,7 +373,6 @@ export default function App() {
         const msg = data?.error ? String(data.error) : "Request failed";
         const full = `${msg}${details ? "\n\n" + details : ""}`;
 
-        // NEW: if billing/credits error, show video UI
         const billing = isBillingLowCredits(full);
         setIsBillingError(billing);
 
@@ -336,7 +407,9 @@ export default function App() {
           <div className="cc-nav-left">
             <video className="cc-nav-logoVideo" src={NAV_LOGO_VIDEO_SRC} autoPlay loop muted playsInline />
           </div>
+
           <div className="cc-title">Call Center Compliance App</div>
+
           <div className="cc-nav-right" />
         </div>
       </header>
@@ -349,6 +422,15 @@ export default function App() {
                 {matrixLoadError}
                 <div className="cc-bannerSub">
                   Fix: put your Excel file here exactly: <b>public/Service Matrix&apos;s 2026.xlsx</b>
+                </div>
+              </div>
+            ) : null}
+
+            {docsLoadError ? (
+              <div className="cc-bannerError">
+                {docsLoadError}
+                <div className="cc-bannerSub">
+                  Check your file names in <b>public/</b>: qa-voice.xlsx, qa-group.xlsx, training_guide.txt
                 </div>
               </div>
             ) : null}
@@ -379,7 +461,6 @@ export default function App() {
               </div>
             ) : null}
 
-            {/* NEW: billing/credits error animation */}
             {!isLoading && isBillingError ? (
               <div className="cc-msg cc-assistant">
                 <div className="cc-bubble cc-bubbleAssistant">
@@ -387,8 +468,8 @@ export default function App() {
                     <video className="cc-errorVideo" src={ERROR_VIDEO_SRC} autoPlay loop muted playsInline />
                     <div className="cc-errorTitle">Claude credits needed</div>
                     <div className="cc-errorHint">
-                      Your Anthropic account has no credits right now. Ask your supervisor to add credits or create a
-                      new API key with billing enabled.
+                      Your Anthropic account has no credits right now. Ask your supervisor to add credits or create a new
+                      API key with billing enabled.
                     </div>
                   </div>
                 </div>
