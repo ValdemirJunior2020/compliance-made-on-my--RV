@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import * as XLSX from "xlsx";
 
-const API_BASE = "http://localhost:5050";
+const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
+
 const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
 const LOADING_GIF_SRC = "/loading.gif"; // ✅ public/loading.gif
 
