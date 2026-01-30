@@ -1,25 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import * as XLSX from "xlsx";
+import "./App.css";
 
 const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
-
 const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
-const LOADING_GIF_SRC = "/loading.gif"; // ✅ public/loading.gif
+const LOADING_GIF_SRC = "/loading.gif";
 
-const hotelPlannerKnowledge =
-  // Paste ALL extracted HotelPlanner policy/procedure text here
-  // Include check-in, cancellations, refunds, escalations, compliance rules, scripts, etc.
-  // You can use \n\n to separate sections;
-  `HOTELPLANNER DOCUMENTS (PASTE YOUR FULL POLICIES HERE)
+// ====== DOCUMENTS (placeholders for tomorrow) ======
+const trainingGuideKnowledge = `TRAINING GUIDE DOCUMENTS (PASTE HERE TOMORROW)`;
+const qaVoiceKnowledge = `QUALITY ASSURANCE VOICE DOCUMENTS (PASTE HERE TOMORROW)`;
+const qaGroupRequestKnowledge = `QUALITY ASSURANCE GROUP REQUEST DOCUMENTS (PASTE HERE TOMORROW)`;
+const hotelPlannerKnowledge = `HOTELPLANNER CORE DOCUMENTS (PASTE HERE TOMORROW)`;
 
-- Scripts / verification
-- Refund / cancellation rules
-- Escalations / SLACK rules
-- Compliance rules
-- Ticket timelines
-`;
-
+// ====== PROMPT ======
 const SYSTEM_PROMPT = `You are QA Master — strict compliance & quality expert for HotelPlanner call center agents.
 Answer ONLY from the provided HotelPlanner documents.
 Never guess, never use external knowledge, never invent steps.
@@ -166,7 +160,9 @@ function sheetToNotesText(worksheet, sheetLabel) {
 }
 
 export default function App() {
-  const [mode, setMode] = useState("voice");
+  const [matrixMode, setMatrixMode] = useState("voice");
+  const [docMode, setDocMode] = useState("matrix");
+
   const [question, setQuestion] = useState("");
   const [lastQuestion, setLastQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -192,7 +188,7 @@ export default function App() {
         const res = await fetch(MATRIX_PUBLIC_PATH, { cache: "no-store" });
         if (!res.ok) {
           throw new Error(
-            `Matrix file not found in /public. Expected: public/Service Matrix's 2026.xlsx (HTTP ${res.status})`
+            `Matrix file not found. Put it in /public as: public/Service Matrix's 2026.xlsx (HTTP ${res.status})`
           );
         }
         const buf = await res.arrayBuffer();
@@ -213,13 +209,20 @@ export default function App() {
     loadMatrix();
   }, []);
 
-  const activeMatrixText = mode === "voice" ? matrixVoiceText : matrixTicketText;
+  const activeMatrixText = matrixMode === "voice" ? matrixVoiceText : matrixTicketText;
+
+  const activeDocsText = useMemo(() => {
+    if (docMode === "training") return trainingGuideKnowledge;
+    if (docMode === "qaVoice") return qaVoiceKnowledge;
+    if (docMode === "qaGroup") return qaGroupRequestKnowledge;
+    return activeMatrixText;
+  }, [docMode, activeMatrixText]);
 
   const combinedKnowledge = useMemo(() => {
-    return [hotelPlannerKnowledge.trim(), activeMatrixText.trim(), matrixNotesText.trim()]
+    return [hotelPlannerKnowledge.trim(), activeDocsText.trim(), matrixNotesText.trim()]
       .filter(Boolean)
       .join("\n\n");
-  }, [activeMatrixText, matrixNotesText]);
+  }, [activeDocsText, matrixNotesText]);
 
   const answerHtml = useMemo(() => {
     const a = (answer || "").trim();
@@ -291,7 +294,7 @@ export default function App() {
               <div className="cc-bannerError">
                 {matrixLoadError}
                 <div className="cc-bannerSub">
-                  Fix: put your Excel file here exactly: <b>public/Service Matrix's 2026.xlsx</b>
+                  Fix: put your Excel file here exactly: <b>public/Service Matrix&apos;s 2026.xlsx</b>
                 </div>
               </div>
             ) : null}
@@ -299,9 +302,7 @@ export default function App() {
             {!lastQuestion && !answer && !isLoading && !errorMsg ? (
               <div className="cc-hero">
                 <div className="cc-heroTitle">HotelPlanner • QA Compliance</div>
-                <div className="cc-heroSub">
-                  Select the correct matrix (Voice or Tickets), then ask a guest situation question.
-                </div>
+                <div className="cc-heroSub">Choose a document button below, then ask a guest situation question.</div>
               </div>
             ) : null}
 
@@ -349,25 +350,60 @@ export default function App() {
 
       <footer className="cc-footer">
         <div className="cc-footer-inner">
-          <div className="cc-modeRow" role="group" aria-label="Matrix mode">
+          <div className="cc-docRow" role="group" aria-label="Knowledge source">
             <button
-              className={`cc-chip ${mode === "voice" ? "is-active" : ""}`}
-              onClick={() => setMode("voice")}
               type="button"
+              className={`cc-chip ${docMode === "matrix" ? "is-active" : ""}`}
+              onClick={() => setDocMode("matrix")}
+            >
+              Matrix
+            </button>
+
+            <button
+              type="button"
+              className={`cc-chip ${docMode === "training" ? "is-active" : ""}`}
+              onClick={() => setDocMode("training")}
+            >
+              Training Guide
+            </button>
+
+            <button
+              type="button"
+              className={`cc-chip ${docMode === "qaVoice" ? "is-active" : ""}`}
+              onClick={() => setDocMode("qaVoice")}
+            >
+              Quality Assurance Voice
+            </button>
+
+            <button
+              type="button"
+              className={`cc-chip ${docMode === "qaGroup" ? "is-active" : ""}`}
+              onClick={() => setDocMode("qaGroup")}
+            >
+              Quality Assurance Group Request
+            </button>
+          </div>
+
+          <div className="cc-modeRow" role="group" aria-label="Matrix tab">
+            <button
+              type="button"
+              className={`cc-chip ${matrixMode === "voice" ? "is-active" : ""}`}
+              onClick={() => setMatrixMode("voice")}
             >
               Voice (Customer Service)
             </button>
+
             <button
-              className={`cc-chip ${mode === "ticket" ? "is-active" : ""}`}
-              onClick={() => setMode("ticket")}
               type="button"
+              className={`cc-chip ${matrixMode === "ticket" ? "is-active" : ""}`}
+              onClick={() => setMatrixMode("ticket")}
             >
               Tickets (Ticket Agents)
             </button>
           </div>
 
           <div className="cc-inputShell">
-            <button className="cc-iconBtn" type="button" aria-label="Add (disabled)">
+            <button className="cc-iconBtn" type="button" aria-label="Add (disabled)" disabled>
               <span className="cc-plus">+</span>
             </button>
 
@@ -383,7 +419,7 @@ export default function App() {
               disabled={isLoading}
             />
 
-            <button className="cc-iconBtn" type="button" aria-label="Mic (disabled)">
+            <button className="cc-iconBtn" type="button" aria-label="Mic (disabled)" disabled>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path
                   d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Z"
