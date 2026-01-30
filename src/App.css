@@ -591,3 +591,58 @@
   /* Drop shadow to make gold pop against the black bar */
   filter: drop-shadow(0 2px 0px rgba(0,0,0,0.5));
 }
+/* =========================================
+   MOBILE RESPONSIVENESS
+   Add this to the very bottom of App.css
+   ========================================= */
+
+/* Tablet & Mobile (Below 768px) */
+@media (max-width: 768px) {
+  
+  /* 1. Make the pipe wider and slightly thinner on mobile */
+  .cc-topbar {
+    width: calc(100vw - 20px); /* Use almost full width */
+    height: 56px;              /* Slightly more compact */
+    top: 10px;
+    padding: 0 8px;            /* Less padding */
+  }
+
+  /* 2. Shrink the Logo to fit the thinner pipe */
+  .cc-navLogo {
+    width: 80px;  /* Shrink from 120px */
+    height: 80px;
+    margin-top: -12px;
+    margin-bottom: -12px;
+    padding: 4px;
+  }
+
+  /* 3. Scale down the Gold Title */
+  .cc-navTitle {
+    font-size: 16px; /* Shrink from 26px */
+    max-width: 50%;  /* Prevent overlap */
+    overflow: hidden;
+    text-overflow: ellipsis; /* Add "..." if screen is too tiny */
+  }
+
+  /* 4. Adjust the Resources button size */
+  .cc-navItem {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+}
+
+/* Tiny Phones (Below 420px) */
+@media (max-width: 420px) {
+  /* On very small screens, the full title might be too long */
+  .cc-navTitle {
+    font-size: 13px; 
+    /* Optional: Uncomment the line below to hide title completely on tiny phones */
+    /* display: none; */
+  }
+  
+  /* Adjust layout spacing */
+  .cc-navPill {
+    gap: 8px;
+    padding: 0 8px;
+  }
+}

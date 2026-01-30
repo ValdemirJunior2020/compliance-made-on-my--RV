@@ -869,7 +869,7 @@ export default function App() {
     <ErrorBoundary>
       <div className="cc-root">
         {/* NAVBAR */}
-       // ... inside return (
+      
 <div className="cc-topbar">
   <div className="cc-navPill">
     <img
