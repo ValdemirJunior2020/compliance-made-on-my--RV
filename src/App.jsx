@@ -4,8 +4,12 @@ import * as XLSX from "xlsx";
 import "./App.css";
 
 const API_BASE = "https://compliance-made-on-my-rv.onrender.com";
+
+// public assets
 const MATRIX_PUBLIC_PATH = "/Service Matrix's 2026.xlsx";
 const LOADING_GIF_SRC = "/loading.gif";
+const NAV_LOGO_VIDEO_SRC = "/Video_Generation_Confirmation.mp4";
+const ERROR_VIDEO_SRC = "/Video_Animation_For_Error_Created.mp4"; // <-- ADD
 
 // ====== DOCUMENTS (placeholders for tomorrow) ======
 const trainingGuideKnowledge = `TRAINING GUIDE DOCUMENTS (PASTE HERE TOMORROW)`;
@@ -159,15 +163,33 @@ function sheetToNotesText(worksheet, sheetLabel) {
   return out.join("\n").trim();
 }
 
+// NEW: detect "low credits" billing error and show special UI
+function isBillingLowCredits(errText) {
+  const s = String(errText || "").toLowerCase();
+  return (
+    s.includes("credit balance is too low") ||
+    s.includes("plans & billing") ||
+    s.includes("purchase credits") ||
+    s.includes("insufficient") ||
+    s.includes("billing")
+  );
+}
+
 export default function App() {
   const [matrixMode, setMatrixMode] = useState("voice");
   const [docMode, setDocMode] = useState("matrix");
+
+  const [activeSourceLabel, setActiveSourceLabel] = useState("Matrix");
+  const [activeTabLabel, setActiveTabLabel] = useState("Voice (Customer Service)");
+  const [debugInfo, setDebugInfo] = useState("");
 
   const [question, setQuestion] = useState("");
   const [lastQuestion, setLastQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState("");
+  const [isBillingError, setIsBillingError] = useState(false); // <-- ADD
 
   const [matrixVoiceText, setMatrixVoiceText] = useState("");
   const [matrixTicketText, setMatrixTicketText] = useState("");
@@ -233,7 +255,25 @@ export default function App() {
   useEffect(() => {
     if (!listRef.current) return;
     listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [answer, isLoading, errorMsg, lastQuestion]);
+  }, [answer, isLoading, errorMsg, lastQuestion, isBillingError]);
+
+  useEffect(() => {
+    const which =
+      docMode === "matrix"
+        ? `Doc: Matrix | Tab: ${matrixMode}`
+        : docMode === "training"
+        ? "Doc: Training Guide"
+        : docMode === "qaVoice"
+        ? "Doc: QA Voice"
+        : "Doc: QA Group Request";
+
+    const matrixLen = (activeMatrixText || "").length;
+    const notesLen = (matrixNotesText || "").length;
+    const docsLen = (activeDocsText || "").length;
+    const coreLen = (hotelPlannerKnowledge || "").length;
+
+    setDebugInfo(`${which} | lengths => core:${coreLen} docs:${docsLen} matrix:${matrixLen} notes:${notesLen}`);
+  }, [docMode, matrixMode, activeMatrixText, activeDocsText, matrixNotesText]);
 
   async function send() {
     const q = question.trim();
@@ -241,6 +281,7 @@ export default function App() {
 
     setIsLoading(true);
     setErrorMsg("");
+    setIsBillingError(false);
     setAnswer("");
     setLastQuestion(q);
 
@@ -250,21 +291,30 @@ export default function App() {
       const res = await fetch(`${API_BASE}/api/claude`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ system, question: q })
+        body: JSON.stringify({ system, question: q }),
       });
 
       const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        const details = data?.details ? `\n\n${data.details}` : "";
-        throw new Error(`${data?.error || "Request failed"}${details}`);
+        const details = data?.details ? String(data.details) : "";
+        const msg = data?.error ? String(data.error) : "Request failed";
+        const full = `${msg}${details ? "\n\n" + details : ""}`;
+
+        // NEW: if billing/credits error, show video UI
+        const billing = isBillingLowCredits(full);
+        setIsBillingError(billing);
+
+        throw new Error(full);
       }
 
       const text = extractClaudeText(data);
       setAnswer(text || "No answer returned.");
       setQuestion("");
     } catch (err) {
-      setErrorMsg(err?.message || "Failed to fetch.");
+      const msg = err?.message || "Failed to fetch.";
+      setErrorMsg(msg);
+      setIsBillingError(isBillingLowCredits(msg));
     } finally {
       setIsLoading(false);
     }
@@ -283,7 +333,11 @@ export default function App() {
     <div className="cc-root">
       <header className="cc-topbar">
         <div className="cc-topbar-inner">
+          <div className="cc-nav-left">
+            <video className="cc-nav-logoVideo" src={NAV_LOGO_VIDEO_SRC} autoPlay loop muted playsInline />
+          </div>
           <div className="cc-title">Call Center Compliance App</div>
+          <div className="cc-nav-right" />
         </div>
       </header>
 
@@ -325,7 +379,23 @@ export default function App() {
               </div>
             ) : null}
 
-            {errorMsg ? (
+            {/* NEW: billing/credits error animation */}
+            {!isLoading && isBillingError ? (
+              <div className="cc-msg cc-assistant">
+                <div className="cc-bubble cc-bubbleAssistant">
+                  <div className="cc-errorMedia">
+                    <video className="cc-errorVideo" src={ERROR_VIDEO_SRC} autoPlay loop muted playsInline />
+                    <div className="cc-errorTitle">Claude credits needed</div>
+                    <div className="cc-errorHint">
+                      Your Anthropic account has no credits right now. Ask your supervisor to add credits or create a
+                      new API key with billing enabled.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {errorMsg && !isBillingError ? (
               <div className="cc-msg cc-assistant">
                 <div className="cc-bubble cc-bubbleAssistant">
                   <div className="cc-error" role="alert">
@@ -354,7 +424,10 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${docMode === "matrix" ? "is-active" : ""}`}
-              onClick={() => setDocMode("matrix")}
+              onClick={() => {
+                setDocMode("matrix");
+                setActiveSourceLabel("Matrix");
+              }}
             >
               Matrix
             </button>
@@ -362,7 +435,10 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${docMode === "training" ? "is-active" : ""}`}
-              onClick={() => setDocMode("training")}
+              onClick={() => {
+                setDocMode("training");
+                setActiveSourceLabel("Training Guide");
+              }}
             >
               Training Guide
             </button>
@@ -370,7 +446,10 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${docMode === "qaVoice" ? "is-active" : ""}`}
-              onClick={() => setDocMode("qaVoice")}
+              onClick={() => {
+                setDocMode("qaVoice");
+                setActiveSourceLabel("Quality Assurance Voice");
+              }}
             >
               Quality Assurance Voice
             </button>
@@ -378,7 +457,10 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${docMode === "qaGroup" ? "is-active" : ""}`}
-              onClick={() => setDocMode("qaGroup")}
+              onClick={() => {
+                setDocMode("qaGroup");
+                setActiveSourceLabel("Quality Assurance Group Request");
+              }}
             >
               Quality Assurance Group Request
             </button>
@@ -388,7 +470,10 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${matrixMode === "voice" ? "is-active" : ""}`}
-              onClick={() => setMatrixMode("voice")}
+              onClick={() => {
+                setMatrixMode("voice");
+                setActiveTabLabel("Voice (Customer Service)");
+              }}
             >
               Voice (Customer Service)
             </button>
@@ -396,10 +481,24 @@ export default function App() {
             <button
               type="button"
               className={`cc-chip ${matrixMode === "ticket" ? "is-active" : ""}`}
-              onClick={() => setMatrixMode("ticket")}
+              onClick={() => {
+                setMatrixMode("ticket");
+                setActiveTabLabel("Tickets (Ticket Agents)");
+              }}
             >
               Tickets (Ticket Agents)
             </button>
+          </div>
+
+          <div className="cc-selectedLine">
+            Using: <b>{activeSourceLabel}</b>
+            {docMode === "matrix" ? (
+              <>
+                {" "}
+                • Tab: <b>{activeTabLabel}</b>
+              </>
+            ) : null}
+            <div className="cc-debugSmall">{debugInfo}</div>
           </div>
 
           <div className="cc-inputShell">

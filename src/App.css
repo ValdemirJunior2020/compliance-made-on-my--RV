@@ -301,3 +301,50 @@
   color: rgba(17, 24, 39, 0.55);
   font-size: 12px;
 }
+/* REPLACE your current .cc-nav-logoVideo with this (smaller + cropped clean) */
+/* ====== Bigger NAV logo video ====== */
+.cc-nav-logoVideo {
+  width: 44px;      /* was 28 */
+  height: 44px;     /* was 28 */
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid rgba(17, 24, 39, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  transform: none;  /* remove zoom tricks */
+}
+
+/* keep navbar layout clean with bigger logo */
+.cc-topbar {
+  height: 60px; /* was 56 */
+}
+
+.cc-topbar-inner {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 72px 1fr 72px; /* gives room for bigger logo */
+  align-items: center;
+  padding: 0 16px;
+}
+
+.cc-nav-left,
+.cc-nav-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+}
+
+/* ====== Bigger ERROR video ====== */
+.cc-errorVideo {
+  width: 420px;    /* was 180 */
+  max-width: 100%;
+  height: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.10);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.cc-errorHint {
+  max-width: 640px; /* let text breathe under bigger video */
+}
