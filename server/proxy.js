@@ -8,59 +8,52 @@ import Anthropic from "@anthropic-ai/sdk";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 1. Load Environment (Robust)
+// Load env from server/.env first, then root .env
 const envPaths = [
   path.join(process.cwd(), "server", ".env"),
-  path.join(process.cwd(), ".env")
+  path.join(process.cwd(), ".env"),
 ];
-envPaths.forEach(p => dotenv.config({ path: p }));
+for (const p of envPaths) dotenv.config({ path: p });
 
 const app = express();
 
-// Config
+// Render sets PORT automatically
 const PORT = Number(process.env.PORT || 5050);
-const MODEL = process.env.MODEL || "claude-3-5-sonnet-20240620";
+
+// ✅ IMPORTANT: your current default model is outdated and returns 404 "model not found".
+// Set MODEL in Render to a valid Claude API model (see .env below).
+const MODEL = process.env.MODEL || "claude-opus-4-5";
+// good default
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 const DEBUG = process.env.DEBUG === "true";
 
-// Logger
 const log = (...a) => DEBUG && console.log("[proxy]", ...a);
 
 app.use(cors({ origin: "*" }));
-app.use(express.json({ limit: "2mb" })); // Limit added for security
+app.use(express.json({ limit: "2mb" }));
 
-// Health Check
 app.get("/health", (req, res) => {
   res.json({ ok: true, port: PORT, model: MODEL, ts: new Date().toISOString() });
 });
 
-// Main Handler
+// shared handler for all chat endpoints
 async function handleAsk(req, res) {
   const reqId = `req_${Date.now()}`;
-  log(`Request ${reqId}:`, req.body?.question?.slice(0, 50));
+  const question = req.body?.question ?? req.body?.text ?? "";
 
-  const question = req.body.question || req.body.text;
-  
-  // Validation
-  if (!question) {
-    return res.status(400).json({ ok: false, error: "Missing 'question'" });
-  }
+  if (!question) return res.status(400).json({ ok: false, error: "Missing 'question'" });
 
-  // Auth Check
   if (!ANTHROPIC_API_KEY) {
-    console.error("Missing ANTHROPIC_API_KEY");
-    // Return 500 but detail explains it
-    return res.status(500).json({ 
-      ok: false, 
-      error: "Server missing API Key. Check Render env vars." 
+    return res.status(500).json({
+      ok: false,
+      error: "Server missing ANTHROPIC_API_KEY. Add it in Render env vars.",
     });
   }
 
   try {
     const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-    
-    // Safety Timeout Race
-    const timeoutPromise = new Promise((_, reject) => 
+
+    const timeoutPromise = new Promise((_, reject) =>
       setTimeout(() => reject(new Error("Upstream timeout")), 55000)
     );
 
@@ -73,30 +66,29 @@ async function handleAsk(req, res) {
     });
 
     const msg = await Promise.race([apiPromise, timeoutPromise]);
-    
-    const text = msg.content[0]?.text || "No text content.";
+    const text = msg?.content?.[0]?.text || "No text content.";
     log(`Success ${reqId}`);
 
     return res.json({ ok: true, answer: text });
-
   } catch (e) {
-    console.error(`Error ${reqId}:`, e.message);
-    
-    // Pass specific status codes to frontend so animation triggers
-    const status = e.status || 500;
-    
-    // Explicitly pass Anthropic billing errors (400/402/403)
-    // so the frontend "isNoCreditsError" check works
+    // Anthropic errors may include: e.status and e.error (raw body)
+    const status = Number(e?.status || 500);
+
+    console.error(`Error ${reqId}:`, e?.message || e);
+
     return res.status(status).json({
       ok: false,
-      error: e.message,
-      body: e.error // Pass raw error body for inspection
+      error: e?.message || "Unknown server error",
+      body: e?.error,
+      model: MODEL,
     });
   }
 }
 
-// Routes
-["/api/claude", "/api/query", "/ask"].forEach(r => app.post(r, handleAsk));
+// Routes your frontend tries (keep all to be safe)
+["/api/claude", "/api/query", "/api/ask", "/api/chat", "/ask", "/chat", "/query"].forEach((r) =>
+  app.post(r, handleAsk)
+);
 
 app.listen(PORT, () => {
   console.log(`Proxy listening on ${PORT}`);
